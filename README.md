@@ -1,9 +1,17 @@
 # sdg14
 Products for Sustainable Development Goal 14 on Life in the Sea from MBON (Marine Biodiversity Observation Network)
 
-## Background
+## Overview
 
-This repository was setup to version and collaborate code and small files subsequent to the March 15-17 meeting in St Petersburg, FL. For notes, presentations and references from the meeting see [bit.ly/sdg14mbon](http://bit.ly/sdg14mbon).
+This repository was setup to version and collaborate code and small data files subsequent to the March 15-17, 2017 meeting in St Petersburg, FL. 
+
+We have three ways of sharing files:
+
+1. **Google Drive** in [bit.ly/sdg14mbon](http://bit.ly/sdg14mbon): simple, easy notes/presentations/spreadsheets, works well for most
+
+1. **Github** [marinebon/sdg14](http://github.com/marinebon/sdg14): versioned scripts, csv’s (small data), etc
+
+1. **Server** `mbon.marine.usf.edu`: big data files
 
 ## Folder Organization
 
