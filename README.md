@@ -3,7 +3,7 @@ Products for Sustainable Development Goal 14 on Life in the Sea from MBON (Marin
 
 ## Overview
 
-This repository was setup to version and collaborate code and small data files subsequent to the March 15-17, 2017 meeting in St Petersburg, FL. 
+This repository was setup to version and collaborate on code and small data files subsequent to the March 15-17, 2017 meeting in St Petersburg, FL. 
 
 We have three ways of sharing files:
 
