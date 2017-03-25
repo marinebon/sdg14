@@ -47,7 +47,7 @@ To get an account on the server, please fill out your info on this spreadsheet:
 
   [Github & mbon.marine.usf.edu accounts - Google Sheets](https://docs.google.com/spreadsheets/d/1KEH0dyjQemg_Tfik0dIIyQ30cqQ1eRcWTaMuZwUO49U/edit#gid=0)
 
-For easily transferring files between server and client, I recommend [CyberDuck](https://cyberduck.io/?l=en) for any platform (Windows /  Mac / Linux).
+For easily transferring files between server and client via SFTP, I recommend [CyberDuck](https://cyberduck.io/?l=en) for any platform (Windows /  Mac / Linux).
 
 ## Software Setup
 
