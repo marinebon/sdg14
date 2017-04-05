@@ -1,0 +1,45 @@
+---
+title: "Untitled"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+rmd = '/mbon/sdg14/satellite/explore.Rmd'
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(ncdf4)
+library(lattice)
+library(raster)
+library(leaflet) # install.packages("leaflet")
+
+nc <- "/mbon/data_big/satellite/chlor_a/clim/A20032007_chlor_a_CLIM_MO_GLOB_9km.nc"
+
+ncdf <- nc_open(nc)
+
+lon <- ncvar_get(ncdf, "longitude")[,1]
+lat <- ncvar_get(ncdf, "latitude")[1,]
+
+r = raster(nc, varname="January_chlor_a_clim") # , ext=extent(min(lon), max(lon), min(lat), max(lat)))
+
+r <- flip(r, direction="y")
+r <- setExtent(r, extent(min(lon), max(lon), min(lat), max(lat)))
+crs(r) <- "+proj=longlat +datum=WGS84 +no_defs"
+plot(r)
+r
+
+r_l = leaflet::projectRasterForLeaflet(r)
+
+pal <- colorNumeric(
+  "Greens",  # RColorBrewer::display.brewer.all()
+  values(r), na.color = "transparent")
+
+leaflet() %>% 
+  addProviderTiles("Stamen.TonerLite") %>%
+  addRasterImage(r_l, colors = pal, opacity = 0.8) %>%
+  addLegend(pal = pal, values = values(r),
+    title = "Chl")
+```
+
