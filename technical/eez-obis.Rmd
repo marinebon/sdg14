@@ -1,0 +1,221 @@
+---
+title: "eez-fao"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+---
+
+## Data Sources
+
+- [Country by EEZ](http://www.marineregions.org/maps.php?album=3264&pic=64931)
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load and Simplify EEZ
+
+```{r init eez, message=F, warning=F}
+library(tidyverse)
+library(sf)
+library(rmapshaper)
+library(RPostgreSQL)
+library(geojsonio)
+library(DT)
+
+# set working dir relative to this rmarkdown file
+if (basename(getwd())=='sdg14') setwd('technical')
+
+eez_shp         = '/Users/bbest/github/shipwrecks/data/World_EEZ_v9_20161021/eez.shp'
+eez_s005_shp    = 'data_big/eez_s005.shp'
+esp_s005_shp    = 'data_big/esp_s005.shp'
+esp_ck_csv      = 'data_big/esp_ck.csv'
+
+if (!file.exists(eez_s005_shp)){
+  eez = st_read(eez_shp)
+  
+  # simplify eez
+  eez_s005 = eez %>%
+    geojson_json() %>% # convert to geojson for faster ms_simplify; 69.6 sec
+    ms_simplify(keep=0.05, keep_shapes=T, explode=F) %>% # simplify; 11.9 minutes
+    geojson_sp() %>% st_as_sf() # convert back to simple features
+  
+  # write to shapefile
+  st_write(eez_s005, eez_s005_shp)
+} else {
+  eez_s005 = st_read(eez_s005_shp)
+}
+
+# plot of EEZ by area
+#plot(eez_s005['Area_km2']) # SLOW!
+
+# show eez table
+eez_s005 %>%
+  select(-geometry) %>%
+  datatable()
+
+# show disputed & joint regimes vs 200 nm
+table(eez_s005$Pol_type)
+```
+
+## Extract OBIS from Spanish Regions
+
+```{r extract spain obis}
+library(robis) # devtools::install_github('iobis/robis')
+
+if (!all(file.exists(esp_s005_shp), file.exists(esp_ck_csv))){
+  # filter for all Spanish claims
+  esp = eez_s005 %>%
+    filter(Sovereign1 == 'Spain' | Sovereign2 == 'Spain' | Sovereign3 == 'Spain')
+  
+  # iterate over all Spanish regions
+  for (i in 1:nrow(esp)){ # i = 1
+    cat(sprintf('%03d: %s\n', i, esp$GeoName[i]))
+    geom = st_as_text(sf::st_geometry(esp))[i]
+    
+    # fetch OBIS data for geometry
+    ck = checklist(geometry = geom)
+    
+    # add MRGID and merge with others
+    if (nrow(ck) > 0 ){
+      ck$MRGID = esp$MRGID[i]
+      if (i == 1){
+        esp_ck = ck
+      } else {
+        esp_ck = esp_ck %>%
+          bind_rows(ck)
+      }
+    }
+  }
+  
+  # calculate species richness per region
+  esp = esp %>%
+    left_join(
+      esp_ck %>%
+      group_by(MRGID) %>%
+      filter(rank_name == 'Species') %>%
+      summarize(
+        n_spp = n()),
+      by='MRGID') %>%
+    mutate(
+      n_spp = ifelse(is.na(n_spp), 0, n_spp),
+      n_spp_log = log10(n_spp + 1))
+  
+  # write shp, csv
+  st_write(esp, esp_s005_shp)
+  write_csv(esp_ck, esp_ck_csv)
+  
+} else {
+  
+  # read shp, csv
+  esp    = st_read(esp_s005_shp)
+  esp_ck = read_csv(esp_ck_csv)
+}
+
+# show esp table
+esp %>%
+  select(MRGID, GeoName, n_spp) %>%
+  datatable()
+```
+
+
+## Map Species Richness in Spanish Regions
+
+```{r map spain}
+library(leaflet)
+library(htmltools)
+
+esp    = st_read(esp_s005_shp)
+
+# setup color palette
+pal = colorNumeric(
+  'Spectral',   # RColorBrewer::display.brewer.all()
+  esp$n_spp_log, na.color = 'transparent')
+
+# interactive map
+leaflet(esp) %>% 
+  addProviderTiles("Stamen.TonerLite") %>%
+  addPolygons(
+    group = 'regions',
+    label = ~mapply(function(n, v) {
+      HTML(sprintf("<em>%s:</em> %s", htmlEscape(n), htmlEscape(v)))},
+      GeoName, n_spp, SIMPLIFY = F),
+    stroke = TRUE, opacity=0.5, weight=2, fillOpacity = 0.5, smoothFactor = 0.5,
+    color=~pal(n_spp_log)) %>%
+  addLegend(
+    "bottomright", pal = pal, opacity = 0.5,
+    values = ~n_spp_log, title = '# species (log10)')
+```
+
+## Map Spain & Neighbor EEZs
+
+```{r map spain & neighbors}
+# # get Spain's neighborhood
+# nbr = eez_s005 %>%
+#   filter(
+#     Sovereign1 == 'Spain' | Sovereign2 == 'Spain' | Sovereign3 == 'Spain' |
+#     )
+# 
+```
+
+```{r old pg, eval=F, echo=F}
+
+db = 'mbon'
+srid_gcs = 4269
+
+con = dbConnect(dbDriver("PostgreSQL"), dbname=db, host='localhost')
+
+dbGetQuery(con, "SELECT COUNT(*) FROM eez")
+
+eez_flds = setdiff(dbListFields(con, 'eez'), 'geom')
+
+tbl = 'eez_esp001'
+sprintf(
+  "CREATE TABLE %s AS
+  SELECT
+  %s,
+  ST_SimplifyPreserveTopology(geom, 0.01) AS geom
+  FROM eez WHERE \"sovereign1\" ILIKE '%%Spain%%' OR \"territory2\" ILIKE '%%Spain%%';", tbl, paste(eez_flds, collapse=',')) %>% cat
+
+"SELECT * FROM geometry_columns WHERE f_table_name = 'eez_esp001';"
+
+"UPDATE geometry_columns SET srid=4269 WHERE f_table_name = 'eez_esp001';"
+# getting GEOMETRY and not MULTIPOLYGON. QGIS says invalid layer
+
+paste0("INSERT INTO geometry_columns (f_table_catalog, f_table_schema, f_table_name, f_geometry_column, coord_dimension, srid, \"type\")
+VALUES ('", db, "','public','", tbl, "','geom',2,", srid_gcs,",'MULTIPOLYGON');") %>% cat
+paste0() (f_table_catalog, f_table_schema, f_table_name, f_geometry_column, coord_dimension, srid, \"type\")
+VALUES ('", db, "','public','", tbl, "','geom',2,", srid_gcs,",'MULTIPOLYGON');") %>% cat
+
+
+  
+eez_esp001
+
+sprintf(
+  "CREATE TABLE eez_s01 AS
+  SELECT
+  %s,
+  ST_SimplifyPreserveTopology(geom, 0.1) 
+  FROM eez;", paste(eez_flds, collapse=',')) %>% cat
+
+
+
+
+"sovereign1" ILIKE '%Spain%' OR "territory2" ILIKE '%Spain%'
+
+dbGetQuery(con, )
+
+dbGetQuery(con, "CREATE TABLE eez_s01 AS
+SELECT ST_SimplifyPreserveTopology(geom, 0.1)
+FROM ST_SimplifyPreserveTopology(eez, 0.1)
+WHERE p.residentialarea > 0; COUNT(*) FROM ")
+
+
+ST_SimplifyPreserveTopology
+
+ST_SimplifyPreserveTopology
+```
+
