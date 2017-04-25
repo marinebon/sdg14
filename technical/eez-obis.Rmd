@@ -1,5 +1,5 @@
 ---
-title: "eez-fao"
+title: "eez-obis"
 output:
   html_document:
     toc: true
@@ -21,7 +21,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r init eez, message=F, warning=F}
 library(tidyverse)
 library(sf)
-library(rmapshaper)
+library(rmapshaper) # bash prep: sudo apt-get update; sudo apt-get install libv8-dev
 library(RPostgreSQL)
 library(geojsonio)
 library(DT)
@@ -29,10 +29,11 @@ library(DT)
 # set working dir relative to this rmarkdown file
 if (basename(getwd())=='sdg14') setwd('technical')
 
-eez_shp         = '/Users/bbest/github/shipwrecks/data/World_EEZ_v9_20161021/eez.shp'
-eez_s005_shp    = 'data_big/eez_s005.shp'
-esp_s005_shp    = 'data_big/esp_s005.shp'
-esp_ck_csv      = 'data_big/esp_ck.csv'
+# setup ~/mbon_data_big: cd ~; ln -s /mbon/data_big mbon_data_big
+eez_shp         = '~/mbon_data_big/technical/boundaries/eez/eez.shp'
+eez_s005_shp    = '~/mbon_data_big/technical/boundaries/eez_derived/eez_s005.shp'
+esp_s005_shp    = '~/mbon_data_big/technical/boundaries/eez_derived/esp_s005.shp'
+esp_ck_csv      = '~/mbon_data_big/technical/boundaries/eez_derived/esp_ck.csv'
 
 if (!file.exists(eez_s005_shp)){
   eez = st_read(eez_shp)
