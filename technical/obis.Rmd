@@ -1,0 +1,55 @@
+---
+title: "obis"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+---
+
+## Data Sources
+
+Going to use [robis](https://github.com/iobis/robis), R client for the OBIS API, to fetch.
+
+See also: [fetch OBIS data globally · Issue #19 · marinebon/sdg14](https://github.com/marinebon/sdg14/issues/19)
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+dir_obis       = '~/mbon_data_big/technical/obis'
+dir_obis_cache = file.path(dir_obis, 'cache')
+if (!dir.exists(dir_obis_cache)) dir.create(dir_obis_cache, recursive=T, showWarnings=F)
+  
+# setup ~/mbon_data_big: cd ~; ln -s /mbon/data_big mbon_data_big
+occ_csv = file.path(dir_obis, 'occurrences.csv')
+```
+
+## Try global all at once
+
+```{r obis global}
+library(tidyverse)
+library(robis) # devtools::install_github('iobis/robis')
+
+# get all occurrences globally, iterating by 1 deg cells
+for (x in seq(-180, 180)){ # x = seq(-180, 180)[1] # x = 0
+  for (y in seq(-90, 90)){ # y = seq(-90, 90)[1] # y = 0
+    
+    # setup geom and csv
+    geom = sprintf(
+      'POLYGON ((%d %d, %d %d, %d %d, %d %d, %d %d))',
+      x, y, x, y+1, x+1, y+1, x+1, y, x, y)
+    occ_xy_csv = sprintf('%s/occ_%03d_%03d.csv', dir_obis_cache, x, y)
+    cat(sprintf('%03d, %03d\n', x, y))
+    
+    if (!file.exists(occ_xy_csv)){
+      # fetch records
+      occ_xy = occurrence(geometry = geom)
+    
+      # write to csv
+      write_csv(occ_xy, occ_xy_csv)
+    }
+  }
+}
+```
+
