@@ -30,20 +30,22 @@ occ_csv = file.path(dir_obis, 'occurrences.csv')
 ```{r obis global}
 library(tidyverse)
 library(robis) # devtools::install_github('iobis/robis')
+library(data.table)
 
 # get all occurrences globally, iterating by 1 deg cells
-for (x in seq(-180, 180)){ # x = seq(-180, 180)[1] # x = 0
-  for (y in seq(-90, 90)){ # y = seq(-90, 90)[1] # y = 0
+for (x in seq(-180, 179)){ # x = seq(-180, 180)[1] # x = 0
+  for (y in seq(-90, 89)){ # y = seq(-90, 90)[1] # y = 0
     
     # setup geom and csv
     geom = sprintf(
       'POLYGON ((%d %d, %d %d, %d %d, %d %d, %d %d))',
       x, y, x, y+1, x+1, y+1, x+1, y, x, y)
     occ_xy_csv = sprintf('%s/occ_%03d_%03d.csv', dir_obis_cache, x, y)
-    cat(sprintf('%03d, %03d\n', x, y))
+    
     
     if (!file.exists(occ_xy_csv)){
       # fetch records
+      cat(sprintf('Fetching %03d, %03d\n', x, y))
       occ_xy = occurrence(geometry = geom)
     
       # write to csv
@@ -51,5 +53,91 @@ for (x in seq(-180, 180)){ # x = seq(-180, 180)[1] # x = 0
     }
   }
 }
+
+
+# summarize longitudinally
+for (y in seq(-90, 89)){ # y = seq(-90, 90)[1] # y = -50
+  cat(sprintf('%d\n', y))
+
+  csvs = tibble(
+    path = list.files(
+      dir_obis_cache, full.names=T,
+      pattern = sprintf('occ_[-]*[0-9]+_%d.csv', y))) %>%
+    mutate(
+      file = basename(path),
+      size = file.size(path)) %>%
+    filter(size > 0)
+  
+  if (nrow(csvs) == 0) next
+
+  suppressMessages({
+    df_list = lapply(csvs$path, read_csv)
+  })
+  #  row     col   expected        actual
+  #1013 eventID an integer NIWA Database
+  #1102 modified date like  May 10 2010 11:36AM
+  #2610 dateIdentified date like  1985-01-18T18:00:00
+  #1055 occurrenceID no trailing characters   _530
+  #...
+  
+  df = rbindlist(df_list, fill=T)
+  
+  rds = sprintf('%s/occ_%d.rds', dir_obis_cache, y)
+  saveRDS(df, rds)
+}
+
+
+
+rdss = tibble(
+  path = list.files(
+    dir_obis_cache, full.names=T,
+    pattern = sprintf('occ_[-]*[0-9].\\.rds'))) %>% 
+  mutate(
+    file = basename(path),
+    size = file.size(path)) %>% 
+  filter(size > 0) %>%
+  arrange(desc(size)) %>%
+  mutate(
+    size_sum = sum(size),
+    size_cum = cumsum(size),
+    size_pct = size_cum / size_sum * 100)
+rdss
+
+#for (i in 1:nrow(rdss)){ # i=1
+for (i in 75:nrow(rdss)){ # i=1
+
+  cat(sprintf('%02d: %s (%0.2f%%)\n', i, basename(rdss$path[i]), rdss$size_pct[i]))
+  d = readRDS(rdss$path[i])
+  
+  if (!'yearcollected' %in% names(d)){
+    cat('  SKIPPING b/c missing: yearcollected\n')
+    next
+  }
+  
+  d = d %>%
+    select(
+      id,decimalLongitude,decimalLatitude,yearcollected,
+      institutionCode,datasetName,
+      phylum,class,order,family,genus,species,scientificName,
+      aphiaID,obisID,resourceID) %>%
+    mutate(
+      year = as.integer(yearcollected)) %>%
+    select(-yearcollected) %>%
+    filter(!is.na(year)) %>%
+    as_tibble()
+
+  if (i == 1){
+    D = d
+  } else {
+    D = bind_rows(D, d)
+  }
+}
+
+write_csv(D, file.path(dir_obis, 'obis_occ.csv')) # 1,789 MB
+saveRDS(D, file.path(dir_obis, 'obis_occ.rds'))   #   111 MB
+
+system.time({
+  occ = readRDS('~/mbon_data_big/technical/obis/obis_occ.rds') # 23 secs
+})
 ```
 
