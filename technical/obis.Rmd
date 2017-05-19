@@ -25,7 +25,37 @@ if (!dir.exists(dir_obis_cache)) dir.create(dir_obis_cache, recursive=T, showWar
 occ_csv = file.path(dir_obis, 'occurrences.csv')
 ```
 
-## Try global all at once
+
+## Global all at once
+
+```{r obis global}
+library(tidyverse)
+library(robis) # devtools::install_github('iobis/robis')
+
+# setup geom
+geom = sprintf(
+  'POLYGON ((%d %d, %d %d, %d %d, %d %d, %d %d))',
+  -180, -90, -180, 90, 180, 90, 180, -90, -180, -90)
+
+flds = c('id,decimalLongitude,decimalLatitude,
+      yearcollected,dateIdentified,
+      institutionCode,datasetName,
+      phylum,class,order,family,genus,species,scientificName,
+      aphiaID,obisID,resourceID
+
+# fetch records
+system.time({
+  occ = occurrence(geometry = geom) # Retrieved 6458000 records of 47777791 (13%) May 1, 5:02pm
+})
+
+# save to rds
+system.time({
+  saveRDS(occ, file.path(dir_obis, 'obis_occ.rds'))
+})
+```
+
+
+## Global by 1 deg cells
 
 ```{r obis global}
 library(tidyverse)

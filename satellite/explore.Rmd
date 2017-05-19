@@ -8,19 +8,19 @@ rmd = '/mbon/sdg14/satellite/explore.Rmd'
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+## Chl Map
 
-```{r}
+```{r chl map}
 library(ncdf4)
 library(lattice)
 library(raster)
 library(leaflet) # install.packages("leaflet")
 
-nc <- "/mbon/data_big/satellite/chlor_a/clim/A20032007_chlor_a_CLIM_MO_GLOB_9km.nc"
+nc_path <- "/mbon/data_big/satellite/chlor_a/clim/A20032007_chlor_a_CLIM_MO_GLOB_9km.nc"
 
-ncdf <- nc_open(nc)
-
-lon <- ncvar_get(ncdf, "longitude")[,1]
-lat <- ncvar_get(ncdf, "latitude")[1,]
+nc <- nc_open(nc_path) # names(nc$var)
+lon <- ncvar_get(nc, "longitude")[,1]
+lat <- ncvar_get(nc, "latitude")[1,]
 
 r = raster(nc, varname="January_chlor_a_clim") # , ext=extent(min(lon), max(lon), min(lat), max(lat)))
 
@@ -41,5 +41,207 @@ leaflet() %>%
   addRasterImage(r_l, colors = pal, opacity = 0.8) %>%
   addLegend(pal = pal, values = values(r),
     title = "Chl")
+```
+
+## Seascape Explorer
+
+[Seascape Visualization Preparation](https://marinebon.github.io/seascape-viz/prep.html)
+
+ftp://mkavanaugh:MBON@ftp.whoi.edu/
+
+
+```{r fetch from ftp}
+library(tidyverse)
+library(RCurl)
+library(stringr)
+
+# csv
+csv_whoi  = 'technical/seascapes_whoi_ftp.csv'
+
+# ftp params
+url_pre   = 'ftp://ftp.whoi.edu'
+url_paths = list(
+  gl  = 'MBON/GLOBAL/BETA/SDG14/seascape/MODIS_3VAR_MO9k/',
+  fl  = 'MBON/GOM_FK/SMALL_MO/',
+  mb  = 'MBON/ENPAC_MB/SMALL_MO/')
+passwd    = read_lines('/mbon/data_big/satellite/.mkavanaugh_passwd_ftp_whoi_mbon')
+usrpwd    = sprintf('mkavanaugh:%s', passwd)
+
+# dir params
+dir_seascapes = '/mbon/data_big/satellite/seascapes'
+sapply(
+  sprintf('%s/%s', dir_seascapes, names(url_paths)), 
+  function(x) dir.create(x, recursive=T, showWarnings=F))
+
+# get ftp connection
+con = getCurlHandle(ftp.use.epsv=F, userpwd=usrpwd)
+
+if (!file.exists(csv_whoi)){
+
+  # get list of filenames
+  for (i in 1:length(names(url_paths))){ # i = 2
+    
+    # get file, url, local path for in ftp path
+    u_i = url_paths[i]
+    p_i = file.path(dir_seascapes, names(url_paths)[i])
+    d_i = tibble(
+      fname = getURL(
+        file.path(url_pre, u_i), curl=con, 
+        ftp.use.epsv=F, dirlistonly=T) %>% str_split('\n') %>% .[[1]]) %>%
+      filter(fname != '') %>%
+      mutate(
+        url  = file.path(url_pre, u_i, fname),
+        path = file.path(p_i, fname))
+    
+    if (i == 1){
+      d = d_i
+    } else {
+      d = bind_rows(d, d_i)
+    }
+    
+    # wait 5 seconds before next request, otherwise get 'Access denied: 530'
+    #Sys.sleep(5)
+  }
+  
+  # write csv
+  write_csv(d, csv_whoi)
+}
+
+# con = getCurlHandle(ftp.use.epsv=F, userpwd=usrpwd)
+d = read_csv(csv_whoi) %>%
+  mutate(
+    path_exists = file.exists(path)) %>%
+  filter(!path_exists)
+
+for (i in 1:nrow(d)){
+#for (i in c(178:181,496:499)){
+  cat(sprintf('%03d (of %d): fetching %s \n', i, nrow(d), d$fname[i]))
+  getBinaryURL(d$url[i], curl=con) %>%
+    writeBin(d$path[i])
+}
+```
+
+## Summarize Continuous
+
+Using chl raster from first chunk.
+
+```{r continuous nc}
+library(tidyverse)
+library(stringr)
+library(sf)
+library(ncdf4)
+library(raster)
+
+eez_s005_shp    = '~/mbon_data_big/technical/boundaries/eez_derived/eez_s005.shp'
+esp_s005_shp    = '~/mbon_data_big/technical/boundaries/eez_derived/esp_s005.shp'
+
+e_s = eez_s005@data %>%
+  filter(Pol_type == '200NM') %>%
+  arrange(Area_km2) %>%
+  select(GeoName, Area_km2, Territory1, Territory2, Sovereign1, Sovereign2)
+View(e_s)
+
+eez_s005 = st_read(eez_s005_shp) %>% 
+  filter(
+    GeoName %in% 
+      c('El Salvador Exclusive Economic Zone','Cypriote Exclusive Economic Zone','Tunisian Exclusive Economic Zone')) %>% 
+  as("Spatial")
+esp_s005 = st_read(esp_s005_shp) %>% as("Spatial")
+
+nc_path <- "/mbon/data_big/satellite/chlor_a/clim/A20032007_chlor_a_CLIM_MO_GLOB_9km.nc"
+nc <- nc_open(nc_path) # names(nc$var)
+lon <- ncvar_get(nc, "longitude")[,1]
+lat <- ncvar_get(nc, "latitude")[1,]
+
+r_ncvar = function(var){
+  lon = ncvar_get(nc, "longitude")[,1]
+  lat = ncvar_get(nc, "latitude")[1,]
+  r = raster(nc_path, varname="January_chlor_a_clim") # , ext=extent(min(lon), max(lon), min(lat), max(lat)))
+  r <- flip(r, direction="y")
+  r <- setExtent(r, extent(min(lon), max(lon), min(lat), max(lat)))
+  crs(r) <- "+proj=longlat +datum=WGS84 +no_defs"
+  return(r)
+}
+
+env = tibble(var = names(nc$var)) %>%
+  filter(str_detect(var, '.*_clim$')) %>%
+  mutate(
+    r        = map(var, r_ncvar))
+
+r_eez = function(r, eez=esp_s005){
+  #browser()
+  data_frame(
+    GeoName = eez$GeoName,
+    mean    = raster::extract(r, eez, fun=mean, na.rm=T)[,1],  
+    sd      = raster::extract(r, eez, fun=sd, na.rm=T)[,1])
+  #browser()
+  #return(v)
+}
+
+vars = names(nc$var)
+vars = vars[str_detect(vars, '.*_clim$')]
+
+s = stack(nc_path, varname=vars)
+b = brick(nc_path), nl=length(names(nc$var)))
+
+brick(stack(sapply(sds, function(x) raster())))
+
+b = brick(stack(sapply(vars, function(v) raster(nc_path, varname=v))))
+lon = ncvar_get(nc, "longitude")[,1]
+lat = ncvar_get(nc, "latitude")[1,]
+b <- flip(b, direction="y")
+b <- setExtent(b, extent(min(lon), max(lon), min(lat), max(lat)))
+crs(b) <- "+proj=longlat +datum=WGS84 +no_defs"
+
+eez=esp_s005
+eez_mean = raster::extract(b, eez, fun=mean, na.rm=T)
+eez_sd   = raster::extract(b, eez, fun=sd, na.rm=T)
+
+eez_mean %>% as_tibble()
+
+
+env = env %>%
+  mutate(
+    eez = map_df(r, r_eez))
+
+ez = r_eez(env$r[1])
+
+GeoName
+
+env_eez_mean_1 = extract(env$r[[1]], eez_s005, fun=mean, na.rm=T)
+
+eez = tibble(
+  GeoName = eez_s005$GeoName)
+
+# memory problems with projectRasterForLeaflet
+# tbl = tbl %>%
+#   mutate(
+#     r_l = map(r, projectRasterForLeaflet))
+
+vals = list()
+for (f in list.files(dir)){
+
+  names(nc$var)
+  
+  # continous raster: mean & sd -> timeseries line with gray border to sd envelope
+  # monthly anomolies by day of year: eg chlor_a/anom/A20021822002212_chlor_a_MO_ANOM_GLOB_9km.nc
+  vals[f] = 
+  ply_mean = extract(r, esp_s005, fun=mean, na.rm=T)
+  ply_sd   = extract(r, esp_s005, fun=sd, na.rm=T)
+  
+  # categorical raster: percent (from sum, area) -> stacked area chart
+  vals[f] = extract(r, eez_s005, fun=c(sum, area))  # na.rm=T
+  
+  # concerns: 
+  # - % cloud
+  # - area reduction towards poles
+  # - % pixel overlap w/ arbitrary poly
+}
+
+mat = 'ftp://mkavanaugh:MBON@ftp.whoi.edu/MBON/GLOBAL/BETA/SDG14/seascape/MODIS_3VAR_MO9k/GLOBE14_I90VAR3_9k_2002182.mat'
+
+eez_s005 =  %>%
+  geojson_sp() 
+  
 ```
 
