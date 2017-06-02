@@ -161,10 +161,11 @@ for (i in 1:nrow(rdss)){ # i=1
 }
 
 #write_csv(D, file.path(dir_obis, 'obis_occ.csv'))
-saveRDS(D, file.path(dir_obis, 'obis_occ.rds'))    #   532 MB
+saveRDS(D, file.path(dir_obis, 'obis_occ.rds'))                     # 532 MB; 43,140,428 rows of obs
+readr::write_csv(occ, '~/mbon_data_big/technical/obis/occ_rds.csv') # 9.15 GB
 
 system.time({
-  occ = readRDS('~/mbon_data_big/technical/obis/obis_occ.rds') # 23 secs
+  occ = readRDS('~/mbon_data_big/technical/obis/obis_occ.rds')      # 23 secs
 })
 ```
 

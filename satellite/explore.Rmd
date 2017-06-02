@@ -16,7 +16,7 @@ library(lattice)
 library(raster)
 library(leaflet) # install.packages("leaflet")
 
-nc_path <- "/mbon/data_big/satellite/chlor_a/clim/A20032007_chlor_a_CLIM_MO_GLOB_9km.nc"
+nc_path <- "~/mbon_data_big/satellite/chlor_a/clim/A20032007_chlor_a_CLIM_MO_GLOB_9km.nc"
 
 nc <- nc_open(nc_path) # names(nc$var)
 lon <- ncvar_get(nc, "longitude")[,1]

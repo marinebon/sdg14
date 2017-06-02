@@ -122,14 +122,13 @@ esp %>%
   datatable()
 ```
 
-
 ## Map Species Richness in Spanish Regions
 
 ```{r map spain}
 library(leaflet)
 library(htmltools)
 
-esp    = st_read(esp_s005_shp)
+esp = st_read(esp_s005_shp)
 
 # setup color palette
 pal = colorNumeric(
@@ -151,9 +150,17 @@ leaflet(esp) %>%
     values = ~n_spp_log, title = '# species (log10)')
 ```
 
-## Get OBIS riMap Spain & Neighbor EEZs
+```{r big obis}
+system.time({
+  occ = readRDS('~/mbon_data_big/technical/obis/obis_occ.rds') # 2.5 min
+})
+write_csv(occ, '~/mbon_data_big/technical/obis/obis_occ.csv')
+```
 
-```{r map spain & neighbors}
+
+## Get OBIS Map of Spain & Neighbor EEZs
+
+```{r map spain & neighbors, eval=F}
 library(sp)
 
 occ = readRDS('~/mbon_data_big/technical/obis/obis_occ.rds') # 23 secs
