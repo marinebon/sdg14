@@ -154,9 +154,18 @@ leaflet(esp) %>%
 ## Get OBIS riMap Spain & Neighbor EEZs
 
 ```{r map spain & neighbors}
-
+library(sp)
 
 occ = readRDS('~/mbon_data_big/technical/obis/obis_occ.rds') # 23 secs
+
+bb = st_bbox(esp)
+
+occ_esp = occ %>%
+  filter(
+    decimalLongitude >= bb[['xmin']],
+    decimalLongitude <= bb[['xmax']],
+    decimalLatitude  >= bb[['ymin']],
+    decimalLatitude  <= bb[['ymax']])
 
 # # get Spain's neighborhood
 # nbr = eez_s005 %>%
