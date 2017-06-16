@@ -125,6 +125,8 @@ for (i in 1:nrow(d)){
 
 Using chl raster from first chunk.
 
+- [plotly with uncertainty ribbon](https://plot.ly/r/graphing-multiple-chart-types/#loess-smoother-with-uncertainty-bounds)
+
 ```{r continuous nc}
 library(tidyverse)
 library(stringr)
