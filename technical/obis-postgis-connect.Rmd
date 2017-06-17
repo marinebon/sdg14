@@ -93,8 +93,8 @@ CREATE TABLE obis_occ (
   "year" int );
 
 -- copy from csv
-\copy obis_occ FROM '/mbon/data_big/technical/obis/obis_occ_head10k.csv' WITH DELIMITER ',' CSV HEADER;
--- \copy obis_occ FROM '/mbon/data_big/technical/obis/obis_occ.csv' WITH DELIMITER ',' CSV HEADER NULL AS 'NA';
+-- \copy obis_occ FROM '/mbon/data_big/technical/obis/obis_occ_head10k.csv' WITH DELIMITER ',' CSV HEADER;
+\copy obis_occ FROM '/mbon/data_big/technical/obis/obis_occ.csv' WITH DELIMITER ',' CSV HEADER NULL AS 'NA';
 
 -- add primary key
 ALTER TABLE obis_occ ADD COLUMN gid serial PRIMARY KEY;
@@ -108,7 +108,6 @@ update obis_occ set geom = ST_SetSRID(ST_MakePoint( "decimalLongitude", "decimal
 -- Create a spatial index on points
 CREATE INDEX idx_obis_occ_geom ON obis_occ USING GIST(geom);
 ```
-
 
 ## test PG connection methods
 
@@ -168,4 +167,35 @@ plot(occ['id'])
 occ3 = st_read_db(con, query='SELECT * FROM obis_occ LIMIT 3')
 ```
 
+## eez & obis in PG
+
+### load eez
+
+```bash
+# log onto mbon server
+ssh ben@mbon.marine.usf.edu
+
+# install shp2pgsql
+sudo apt-get install postgis
+
+# log into bash shell of postgis docker container 
+docker exec -it postgis bash
+
+# load eez.shp into postgis db
+SHP=/mbon/data_big/technical/boundaries/eez/eez.shp
+shp2pgsql -i -D -d -s 4269 -I $SHP eez | psql -h localhost -U docker -p 5432 -d mbon
+```
+
+on mac: `psql -h mbon.marine.usf.edu -U docker -p 5432 -d mbon`
+
+```{r}
+library(sf)
+
+st_layers(dsn)
+res = st_read_db(con, query='
+  SELECT o.gid, e.gid
+  INTO obis_eez
+  FROM obis_occ AS o INNER JOIN eez AS e ON ST_Intersects(o.geom, e.geom);')
+st_layers(dsn)
+```
 
