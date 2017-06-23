@@ -6,6 +6,8 @@ output: html_document
 ```{r setup, include=FALSE}
 rmd = '/mbon/sdg14/satellite/explore.Rmd'
 knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
 ```
 
 ## Chl Map
@@ -16,19 +18,23 @@ library(lattice)
 library(raster)
 library(leaflet) # install.packages("leaflet")
 
-nc_path <- "~/mbon_data_big/satellite/chlor_a/clim/A20032007_chlor_a_CLIM_MO_GLOB_9km.nc"
+nc_path <- "/mbon/data_big/satellite/chlor_a/clim_9km/A20032007_chlor_a_CLIM_MO_GLOB_9km.nc"
+nc_path <- "/mbon/data_big/satellite/chlor_a/clim_27km/A20032007_chlor_a_CLIM_MO_GLOB_27km.nc"
+
+# TODO: why ben has to own? sudo chown -R ben /mbon/data_big/satellite
 
 nc <- nc_open(nc_path) # names(nc$var)
 lon <- ncvar_get(nc, "longitude")[,1]
 lat <- ncvar_get(nc, "latitude")[1,]
 
-r = raster(nc, varname="January_chlor_a_clim") # , ext=extent(min(lon), max(lon), min(lat), max(lat)))
+#r = raster(nc, varname="January_chlor_a_clim") # , ext=extent(min(lon), max(lon), min(lat), max(lat)))
+r = raster(nc_path, varname="January_chlor_a_clim") # , ext=extent(min(lon), max(lon), min(lat), max(lat)))
 
 r <- flip(r, direction="y")
 r <- setExtent(r, extent(min(lon), max(lon), min(lat), max(lat)))
 crs(r) <- "+proj=longlat +datum=WGS84 +no_defs"
-plot(r)
-r
+#plot(r)
+#r
 
 r_l = leaflet::projectRasterForLeaflet(r)
 
@@ -38,7 +44,7 @@ pal <- colorNumeric(
 
 leaflet() %>% 
   addProviderTiles("Stamen.TonerLite") %>%
-  addRasterImage(r_l, colors = pal, opacity = 0.8) %>%
+  addRasterImage(r_l, colors = pal, opacity = 0.8, project=F) %>%
   addLegend(pal = pal, values = values(r),
     title = "Chl")
 ```
@@ -50,8 +56,7 @@ leaflet() %>%
 ftp://mkavanaugh:MBON@ftp.whoi.edu/
 
 
-```{r fetch from ftp}
-library(tidyverse)
+```{r fetch from ftp, eval=F}
 library(RCurl)
 library(stringr)
 
@@ -133,24 +138,29 @@ library(stringr)
 library(sf)
 library(ncdf4)
 library(raster)
+select = dplyr::select
 
-eez_s005_shp    = '~/mbon_data_big/technical/boundaries/eez_derived/eez_s005.shp'
-esp_s005_shp    = '~/mbon_data_big/technical/boundaries/eez_derived/esp_s005.shp'
+eez_s005_shp    = '/mbon/data_big/technical/boundaries/eez_derived/eez_s005.shp'
+esp_s005_shp    = '/mbon/data_big/technical/boundaries/eez_derived/esp_s005.shp'
 
-e_s = eez_s005@data %>%
+eez_s005 = read_sf(eez_s005_shp)
+
+e_s = eez_s005 %>%
   filter(Pol_type == '200NM') %>%
   arrange(Area_km2) %>%
   select(GeoName, Area_km2, Territory1, Territory2, Sovereign1, Sovereign2)
-View(e_s)
+View(e_s %>% as_tibble())
 
-eez_s005 = st_read(eez_s005_shp) %>% 
-  filter(
-    GeoName %in% 
-      c('El Salvador Exclusive Economic Zone','Cypriote Exclusive Economic Zone','Tunisian Exclusive Economic Zone')) %>% 
-  as("Spatial")
-esp_s005 = st_read(esp_s005_shp) %>% as("Spatial")
+# eez_s005 = st_read(eez_s005_shp) %>% 
+#   filter(
+#     GeoName %in% 
+#       c('El Salvador Exclusive Economic Zone','Cypriote Exclusive Economic Zone','Tunisian Exclusive Economic Zone')) %>% 
+#   as("Spatial")
+esp_s005 = read_sf(esp_s005_shp) %>% as("Spatial")
 
-nc_path <- "/mbon/data_big/satellite/chlor_a/clim/A20032007_chlor_a_CLIM_MO_GLOB_9km.nc"
+nc_path <- "/mbon/data_big/satellite/chlor_a/clim_9km/A20032007_chlor_a_CLIM_MO_GLOB_9km.nc"
+#nc_path <- "/mbon/data_big/satellite/chlor_a/clim_27km/A20032007_chlor_a_CLIM_MO_GLOB_27km.nc"
+
 nc <- nc_open(nc_path) # names(nc$var)
 lon <- ncvar_get(nc, "longitude")[,1]
 lat <- ncvar_get(nc, "latitude")[1,]
@@ -158,7 +168,7 @@ lat <- ncvar_get(nc, "latitude")[1,]
 r_ncvar = function(var){
   lon = ncvar_get(nc, "longitude")[,1]
   lat = ncvar_get(nc, "latitude")[1,]
-  r = raster(nc_path, varname="January_chlor_a_clim") # , ext=extent(min(lon), max(lon), min(lat), max(lat)))
+  r = raster(nc_path, varname=var) # , ext=extent(min(lon), max(lon), min(lat), max(lat)))
   r <- flip(r, direction="y")
   r <- setExtent(r, extent(min(lon), max(lon), min(lat), max(lat)))
   crs(r) <- "+proj=longlat +datum=WGS84 +no_defs"
@@ -183,21 +193,73 @@ r_eez = function(r, eez=esp_s005){
 vars = names(nc$var)
 vars = vars[str_detect(vars, '.*_clim$')]
 
-s = stack(nc_path, varname=vars)
-b = brick(nc_path), nl=length(names(nc$var)))
-
-brick(stack(sapply(sds, function(x) raster())))
-
-b = brick(stack(sapply(vars, function(v) raster(nc_path, varname=v))))
+yr = round(mean(c(2003, 2007)))
+s = stack(sapply(vars, function(v) raster(nc_path, varname=v)))
+names(s) = vars
+#names(s) = sprintf('%02d', 1:12)
 lon = ncvar_get(nc, "longitude")[,1]
 lat = ncvar_get(nc, "latitude")[1,]
-b <- flip(b, direction="y")
-b <- setExtent(b, extent(min(lon), max(lon), min(lat), max(lat)))
-crs(b) <- "+proj=longlat +datum=WGS84 +no_defs"
+s <- flip(s, direction="y")
+s <- setExtent(s, extent(min(lon), max(lon), min(lat), max(lat)))
+crs(s) <- "+proj=longlat +datum=WGS84 +no_defs"
 
+s
 eez=esp_s005
-eez_mean = raster::extract(b, eez, fun=mean, na.rm=T)
-eez_sd   = raster::extract(b, eez, fun=sd, na.rm=T)
+plot(eez)
+eez_mean = raster::extract(s, eez, fun=mean, na.rm=T)
+eez_sd   = raster::extract(s, eez, fun=sd, na.rm=T)
+
+
+d = eez_mean %>% 
+  as_tibble() %>%
+  mutate(
+    eez = eez$GeoName) %>%
+  gather(month, mean, -eez) %>%
+  left_join(
+    eez_sd  %>% 
+      as_tibble() %>%
+      mutate(
+        eez = eez$GeoName) %>%
+      gather(month, sd, -eez),
+    by=c('eez','month')) %>%
+  mutate(
+    lwr_sd = mean - sd,
+    upr_sd = mean + sd,
+    month = plyr::mapvalues(
+        month,
+        sprintf('%s_chlor_a_clim', month.name),
+        sprintf('%s-%02d-01', yr, 1:12)))
+  View(d)
+
+a = d %>%
+  filter(eez=="Spanish Exclusive Economic Zone")
+
+x = xts(a %>% select(-eez,-month,-sd), a$month %>% as.Date())
+
+
+#the axis label is passed as a date, this function outputs only the month of the date
+getMonth <- 'function(d){
+               var monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun","Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+               return monthNames[d.getMonth()];
+               }'
+
+#the x values are passed as milliseconds, turn them into a date and extract month and day
+getMonthDay <- 'function(d) {
+                var monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun","Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+                date = new Date(d);
+                //return monthNames[date.getMonth()] + " " +date.getUTCDate(); }
+                return monthNames[date.getMonth()]; }'
+
+dygraph(x, main = "Climatic Chlorophyll (2003 - 2007)") %>%
+  dySeries(c('lwr_sd', 'mean', 'upr_sd'), label = "Chl a") %>%
+  dyAxis("x",valueFormatter=JS(getMonthDay), axisLabelFormatter=JS(getMonth))
+
+library(dygraphs) # install.packages("dygraphs")
+hw <- HoltWinters(ldeaths)
+p <- predict(hw, n.ahead = 72, prediction.interval = TRUE)
+
+dygraph(p, main = "Predicted Lung Deaths (UK)") %>%
+  dySeries(c("lwr", "fit", "upr"), label = "Deaths")
 
 eez_mean %>% as_tibble()
 
