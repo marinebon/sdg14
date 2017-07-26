@@ -149,33 +149,22 @@ CREATE INDEX idx_obis_occ_year    ON obis_occ ("year");
 ### RPostgreSQL
 
 ```{r RPostgreSQL}
-library(tidyverse)
-library(RPostgreSQL)
-
-db = list(
-  host = read_delim('/etc/hosts', '\t', col_names=c('ip','host')) %>%
-    separate(host, c('name','image'), extra='merge', fill='left') %>%
-    filter(name=='postgis') %>%
-    .$ip,
-  port = 5432,
-  user = 'docker',
-  pass = readLines('/mbon/.pg_pass_docker'),
-  name = 'mbon')
-db$dsn=sprintf(
-  "PG:dbname=%s host=%s port=%s user=%s password=%s", 
-  db$name, db$host, db$port, db$user, db$pass)
-
-con = dbConnect(
-  dbDriver('PostgreSQL'), 
-  dbname=db$name, 
-  user=db$user, password=db$pass, host=db$host, port=db$port)
-
-dbListTables(con)
-dbExistsTable(con, "obis_occ")
-
-dbGetQuery(con, 'select * from geometry_columns')
-dbGetQuery(con, 'select * from geography_columns')
+if (basename(getwd()) != 'technical') setwd('/mbon/sdg14/technical')
+source('mbon_postgis_db.R')
 ```
+
+```{r}
+
+occ3 = st_read_db(con, query='SELECT * FROM obis_occ LIMIT 3')
+
+# simplify eez
+eez_s005 = eez %>%
+  geojson_json() %>% # convert to geojson for faster ms_simplify; 69.6 sec
+  ms_simplify(keep=0.05, keep_shapes=T, explode=F) %>% # simplify; 11.9 minutes
+  geojson_sp() %>% st_as_sf() # convert back to simple features
+
+```
+
 
 
 
@@ -227,15 +216,19 @@ occ3 = st_read_db(con, query='SELECT * FROM obis_occ LIMIT 3')
 # log onto mbon server
 ssh ben@mbon.marine.usf.edu
 
-# install shp2pgsql
-sudo apt-get install postgis
-
 # log into bash shell of postgis docker container 
 docker exec -it postgis bash
+
+# install shp2pgsql
+sudo apt-get install postgis
 
 # load eez.shp into postgis db
 SHP=/mbon/data_big/technical/boundaries/eez/eez.shp
 shp2pgsql -d -i -D -s 4326 -I -G $SHP eez | psql -h localhost -U docker -p 5432 -d mbon
+
+
+SHP=/mbon/data_big/technical/boundaries/eez_derived/eez_s005.shp
+shp2pgsql -d -i -D -s 4326 -I -G $SHP eez_s005 | psql -h localhost -U docker -p 5432 -d mbon
 ```
 
 on mac: `psql -h mbon.marine.usf.edu -U docker -p 5432 -d mbon`
@@ -254,14 +247,14 @@ SQL=/mbon/geoserver/obis_attr.sql
 LOG=/mbon/geoserver/obis_attr.log
 rm $LOG
 echo " \
-SELECT now(); \
-DROP TABLE IF EXISTS obis_attr CASCADE; \
-SELECT o.gid AS obis_gid, e.gid AS eez_gid \
- INTO obis_attr \
- FROM obis_occ AS o LEFT JOIN eez AS e ON ST_Intersects(o.geog, e.geog); \
- CREATE INDEX idx_obis_attr_obis ON obis_attr ("obis_gid"); \
- CREATE INDEX idx_obis_attr_eez  ON obis_attr ("eez_gid"); \
-SELECT now(); \
+SELECT now(); -- SELECT now(); 7:26
+DROP TABLE IF EXISTS obis_attr CASCADE;
+SELECT o.gid AS obis_gid, e.gid AS eez_gid 
+ INTO obis_attr 
+ FROM obis_occ AS o LEFT JOIN eez AS e ON ST_Intersects(o.geog, e.geog); 
+CREATE INDEX idx_obis_attr_obis ON obis_attr ("obis_gid"); 
+CREATE INDEX idx_obis_attr_eez  ON obis_attr ("eez_gid"); 
+SELECT now(); 
 " > $SQL
 cat $SQL
 psql -h localhost -U docker -p 5432 -d mbon -f $SQL -a -L $LOG &
@@ -270,6 +263,13 @@ cat $LOG
 
 ps -eaf | grep psql
 pid 296
+
+## above not working, so trying in bits
+
+```{r}
+
+```
+
 
 ```{r obis & eez}
 library(sf)

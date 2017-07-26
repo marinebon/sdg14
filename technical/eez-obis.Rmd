@@ -37,13 +37,13 @@ esp_ck_csv      = '~/mbon_data_big/technical/boundaries/eez_derived/esp_ck.csv'
 
 if (!file.exists(eez_s005_shp)){
   eez = st_read(eez_shp)
-  
+
   # simplify eez
   eez_s005 = eez %>%
     geojson_json() %>% # convert to geojson for faster ms_simplify; 69.6 sec
     ms_simplify(keep=0.05, keep_shapes=T, explode=F) %>% # simplify; 11.9 minutes
     geojson_sp() %>% st_as_sf() # convert back to simple features
-  
+
   # write to shapefile
   st_write(eez_s005, eez_s005_shp)
 } else {
@@ -71,15 +71,15 @@ if (!all(file.exists(esp_s005_shp), file.exists(esp_ck_csv))){
   # filter for all Spanish claims
   esp = eez_s005 %>%
     filter(Sovereign1 == 'Spain' | Sovereign2 == 'Spain' | Sovereign3 == 'Spain')
-  
+
   # iterate over all Spanish regions
   for (i in 1:nrow(esp)){ # i = 1
     cat(sprintf('%03d: %s\n', i, esp$GeoName[i]))
     geom = st_as_text(sf::st_geometry(esp))[i]
-    
+
     # fetch OBIS data for geometry
     ck = checklist(geometry = geom)
-    
+
     # add MRGID and merge with others
     if (nrow(ck) > 0 ){
       ck$MRGID = esp$MRGID[i]
@@ -91,7 +91,7 @@ if (!all(file.exists(esp_s005_shp), file.exists(esp_ck_csv))){
       }
     }
   }
-  
+
   # calculate species richness per region
   esp = esp %>%
     left_join(
@@ -104,13 +104,13 @@ if (!all(file.exists(esp_s005_shp), file.exists(esp_ck_csv))){
     mutate(
       n_spp = ifelse(is.na(n_spp), 0, n_spp),
       n_spp_log = log10(n_spp + 1))
-  
+
   # write shp, csv
   st_write(esp, esp_s005_shp)
   write_csv(esp_ck, esp_ck_csv)
-  
+
 } else {
-  
+
   # read shp, csv
   esp    = st_read(esp_s005_shp)
   esp_ck = read_csv(esp_ck_csv)
@@ -136,7 +136,7 @@ pal = colorNumeric(
   esp$n_spp_log, na.color = 'transparent')
 
 # interactive map
-leaflet(esp) %>% 
+leaflet(esp) %>%
   addProviderTiles("Stamen.TonerLite") %>%
   addPolygons(
     group = 'regions',
@@ -179,7 +179,7 @@ occ_esp = occ %>%
 #   filter(
 #     Sovereign1 == 'Spain' | Sovereign2 == 'Spain' | Sovereign3 == 'Spain' |
 #     )
-# 
+#
 ```
 
 ```{r old pg, eval=F, echo=F}
@@ -212,14 +212,14 @@ paste0() (f_table_catalog, f_table_schema, f_table_name, f_geometry_column, coor
 VALUES ('", db, "','public','", tbl, "','geom',2,", srid_gcs,",'MULTIPOLYGON');") %>% cat
 
 
-  
+
 eez_esp001
 
 sprintf(
   "CREATE TABLE eez_s01 AS
   SELECT
   %s,
-  ST_SimplifyPreserveTopology(geom, 0.1) 
+  ST_SimplifyPreserveTopology(geom, 0.1)
   FROM eez;", paste(eez_flds, collapse=',')) %>% cat
 
 
@@ -240,3 +240,128 @@ ST_SimplifyPreserveTopology
 ST_SimplifyPreserveTopology
 ```
 
+
+## Get FL Keys Sample Extract
+
+```{r fknms bbox}
+#fknms = read_sf('https://github.com/marinebon/analysis/blob/gh-pages/data/FKNMS_Marine_Zones.kml')
+source('mbon_postgis_db.R')
+
+fknms = read_sf('http://floridakeys.noaa.gov/fknms_map/FKNMS_Marine_Zones.kmz')
+bb = st_bbox(fknms)
+
+nms_fk = fknms
+
+st_write_db(con, nms_fk, dropTable=T)
+
+# http://postgis.net/docs/performance_tips.html#avoiding_dimension_conversion
+#dbSendQuery(con, 'UPDATE nms_fk SET geometry = ST_Force2D(geometry); VACUUM FULL ANALYZE nms_fk;')
+# https://gis.stackexchange.com/questions/109410/postgis-column-has-z-dimension-but-geometry-does-not
+dbSendQuery(con, 'ALTER TABLE nms_fk ALTER COLUMN geometry TYPE geometry(Polygon) USING ST_Force_2D(geometry);')
+
+dbSendQuery(con, 'SELECT * INTO obis_occ_10k FROM obis_occ LIMIT 10000;')
+
+system.time({
+dbSendQuery(con, '
+  -- Create a spatial index on points
+  CREATE INDEX idx_obis_occ_10k_geog ON obis_occ_10k USING GIST(geog);
+
+  -- Create other indexes
+  CREATE INDEX idx_obis_occ_10k_lon     ON obis_occ_10k ("decimalLongitude");
+  CREATE INDEX idx_obis_occ_10k_lat     ON obis_occ_10k ("decimalLatitude");
+  CREATE INDEX idx_obis_occ_10k_phylum  ON obis_occ_10k ("phylum");
+  CREATE INDEX idx_obis_occ_10k_class   ON obis_occ_10k ("class");
+  CREATE INDEX idx_obis_occ_10k_order   ON obis_occ_10k ("order");
+  CREATE INDEX idx_obis_occ_10k_family  ON obis_occ_10k ("family");
+  CREATE INDEX idx_obis_occ_10k_genus   ON obis_occ_10k ("genus");
+  CREATE INDEX idx_obis_occ_10k_species ON obis_occ_10k ("species");
+  CREATE INDEX idx_obis_occ_10k_scientificName ON obis_occ_10k ("scientificName");
+  CREATE INDEX idx_obis_occ_10k_obisID  ON obis_occ_10k ("obisID");
+  CREATE INDEX idx_obis_occ_10k_year    ON obis_occ_10k ("year");')
+})
+# 4.5 min
+
+# [Select bounding box using postgis - Geographic Information Systems Stack Exchange](https://gis.stackexchange.com/questions/25797/select-bounding-box-using-postgis)
+#sprintf(ST_MakeEnvelope(left, bottom, right, top, srid)
+
+dbSendQuery(con, 'ALTER TABLE obis_occ ADD COLUMN test_fknms BOOLEAN;')
+system.time({
+  dbSendQuery(con, 'UPDATE obis_occ_10k AS o SET test_fknms = TRUE FROM nms_fk AS n WHERE o.geog::geometry && n.geometry;')
+})
+o = st_read_db(con, query='SELECT * FROM obis_occ_10k WHERE test_fknms IS NULL;')
+plot(o['id'])
+
+
+dbSendQuery(con, 'ALTER TABLE obis_occ_10k ADD COLUMN eez_territory varchar(80);')
+system.time({
+  dbSendQuery(con, '
+UPDATE obis_occ_10k SET eez_territory = e.territory1
+  FROM obis_occ_10k AS o
+    INNER JOIN eez_s005 AS e
+    ON (o.geog::geometry && e.geog::geometry
+    AND ST_INTERSECTS(o.geog::geometry, e.geog::geometry));')
+  }) # 3.5 min
+
+o = st_read_db(con, query='SELECT * FROM obis_occ_10k', geom_column='geog') # table='obis_occ_10k') # query='SELECT * FROM obis_occ_10k')
+table(o$eez_territory)
+# American Samoa 
+#          10000
+plot(o['eez_territory'])
+
+
+dbSendQuery(con, 'SELECT * INTO obis_occ_1k FROM obis_occ LIMIT 1000;')
+system.time({
+dbSendQuery(con, '
+  -- Create a spatial index on points
+  CREATE INDEX idx_obis_occ_1k_geog ON obis_occ_1k USING GIST(geog);
+
+  -- Create other indexes
+  CREATE INDEX idx_obis_occ_1k_lon     ON obis_occ_1k ("decimalLongitude");
+  CREATE INDEX idx_obis_occ_1k_lat     ON obis_occ_1k ("decimalLatitude");
+  CREATE INDEX idx_obis_occ_1k_phylum  ON obis_occ_1k ("phylum");
+  CREATE INDEX idx_obis_occ_1k_class   ON obis_occ_1k ("class");
+  CREATE INDEX idx_obis_occ_1k_order   ON obis_occ_1k ("order");
+  CREATE INDEX idx_obis_occ_1k_family  ON obis_occ_1k ("family");
+  CREATE INDEX idx_obis_occ_1k_genus   ON obis_occ_1k ("genus");
+  CREATE INDEX idx_obis_occ_1k_species ON obis_occ_1k ("species");
+  CREATE INDEX idx_obis_occ_1k_scientificName ON obis_occ_1k ("scientificName");
+  CREATE INDEX idx_obis_occ_1k_obisID  ON obis_occ_1k ("obisID");
+  CREATE INDEX idx_obis_occ_1k_year    ON obis_occ_1k ("year");')
+}) # 0.5 sec
+
+dbSendQuery(con, 'ALTER TABLE obis_occ_1k ADD COLUMN eez_territory varchar(80);')
+system.time({
+  dbSendQuery(con, '
+UPDATE obis_occ_1k AS o SET eez_territory = e.territory1
+  FROM eez_s005 AS e
+  WHERE ST_Contains(e.geog, o.geog);')
+  }) # 10 sec
+o = st_read_db(con, query='SELECT * FROM obis_occ_1k', geom_column='geog') # table='obis_occ_10k') # query='SELECT * FROM obis_occ_10k')
+table(o$eez_territory)
+# United Kingdom 
+#           1000
+plot(o['eez_territory'], graticule=st_crs(o), axes=T)
+plot(o['eez_territory'], axes=T)
+mapview(o['eez_territory'])
+
+
+# RS-DBI driver: (could not Retrieve the result : ERROR:  function st_contains(geography, geography) does not exist
+#   LINE 4:   WHERE ST_Contains(e.geog, o.geog);                 ^
+#   HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+system.time({
+  dbSendQuery(con, '
+UPDATE obis_occ_10k AS o SET eez_territory = NULL;
+UPDATE obis_occ_10k AS o SET eez_territory = e.territory1
+  FROM eez_s005 AS e
+  WHERE ST_Contains(e.geog::geometry, o.geog::geometry);')
+  }) # 57 sec
+
+o = st_read_db(con, query='SELECT * FROM obis_occ_10k', geom_column='geog') # table='obis_occ_10k') # query='SELECT * FROM obis_occ_10k')
+table(o$eez_territory)
+# Alaska                               American Samoa                                   Antarctica 
+#     31                                         1229                                           19
+# ....
+plot(o['eez_territory'], graticule=st_crs(o), axes=T)
+mapviewOptions(vector.palette = colorRampPalette(brewer.pal(9, 'Spectral')))
+mapview(o, zcol='eez_territory')
+```
