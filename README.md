@@ -56,3 +56,9 @@ For a quick primer on getting setup with Git, Github and RStudio, please see:
   [marinebon.github.io/help](https://marinebon.github.io/help/setup.html)
 
 We will be expanding documentation here in the near future.
+
+## mbon server access points
+* [Rstudio log in](http://mbon.marine.usf.edu:8787/auth-sign-in?error=1)
+* [PostgreSQL studio log in](http://mbon.marine.usf.edu:8080/pgstudio/)
+* [shiny apps root dir](http://mbon.marine.usf.edu:3838/)
+    - [shiny app test](http://mbon.marine.usf.edu:3838/test/)
