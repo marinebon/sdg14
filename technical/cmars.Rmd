@@ -1,0 +1,21 @@
+---
+title: "CMARS EBSA"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(sf)
+library(mapview)
+library(robis2) # devtools::install_github('iobis/robis2')
+
+if (basename(getwd()) != 'technical') setwd('technical')
+
+cmars_geo = 'https://chm.cbd.int/api/v2013/documents/FB73B0D1-64FB-367F-405A-51AAA4C060F7/attachments/ETTP_8_EBSA.geojson'
+cmars = read_sf(cmars_geo)
+
+# https://github.com/iobis/robis2.git
+
+```
+

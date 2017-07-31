@@ -245,6 +245,7 @@ ST_SimplifyPreserveTopology
 
 ```{r fknms bbox}
 #fknms = read_sf('https://github.com/marinebon/analysis/blob/gh-pages/data/FKNMS_Marine_Zones.kml')
+# setwd('technical')
 source('mbon_postgis_db.R')
 
 fknms = read_sf('http://floridakeys.noaa.gov/fknms_map/FKNMS_Marine_Zones.kmz')
@@ -349,14 +350,21 @@ mapview(o['eez_territory'])
 #   LINE 4:   WHERE ST_Contains(e.geog, o.geog);                 ^
 #   HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
 system.time({
-  dbSendQuery(con, '
-UPDATE obis_occ_10k AS o SET eez_territory = NULL;
-UPDATE obis_occ_10k AS o SET eez_territory = e.territory1
-  FROM eez_s005 AS e
-  WHERE ST_Contains(e.geog::geometry, o.geog::geometry);')
-  }) # 57 sec
+  dbSendQuery(con, "
+ALTER TABLE obis_occ ADD COLUMN eez_territory varchar(80);
+UPDATE obis_occ SET eez_territory = NULL;
+UPDATE obis_occ AS pts SET eez_territory = 'Spain'
+  FROM (
+    SELECT Territory1, geog 
+    FROM eez
+    WHERE Territory1 = 'Spain') AS ply
+  WHERE ST_INTERSECTS(pts.geog::geometry, ply.geog::geometry);") # WHERE ST_Contains(e.geog::geometry, o.geog::geometry);')
+  }) # 57/54/61 for && /10 for Spain
+
+#WHERE pts.geog::geometry && ply.geog::geometry AND
 
 o = st_read_db(con, query='SELECT * FROM obis_occ_10k', geom_column='geog') # table='obis_occ_10k') # query='SELECT * FROM obis_occ_10k')
+o = st_read_db(con, query="SELECT * FROM obis_occ_10k WHERE eez_territory = 'Spain'", geom_column='geog') # table='obis_occ_10k') # query='SELECT * FROM obis_occ_10k')
 table(o$eez_territory)
 # Alaska                               American Samoa                                   Antarctica 
 #     31                                         1229                                           19
