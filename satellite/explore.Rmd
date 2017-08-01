@@ -149,7 +149,7 @@ e_s = eez_s005 %>%
   filter(Pol_type == '200NM') %>%
   arrange(Area_km2) %>%
   select(GeoName, Area_km2, Territory1, Territory2, Sovereign1, Sovereign2)
-View(e_s %>% as_tibble())
+View(e_s %>% st_set_geometry(NULL))
 
 # eez_s005 = st_read(eez_s005_shp) %>% 
 #   filter(
@@ -158,8 +158,8 @@ View(e_s %>% as_tibble())
 #   as("Spatial")
 esp_s005 = read_sf(esp_s005_shp) %>% as("Spatial")
 
-nc_path <- "/mbon/data_big/satellite/chlor_a/clim_9km/A20032007_chlor_a_CLIM_MO_GLOB_9km.nc"
-#nc_path <- "/mbon/data_big/satellite/chlor_a/clim_27km/A20032007_chlor_a_CLIM_MO_GLOB_27km.nc"
+#nc_path <- "/mbon/data_big/satellite/chlor_a/clim_9km/A20032007_chlor_a_CLIM_MO_GLOB_9km.nc"
+nc_path <- "/mbon/data_big/satellite/chlor_a/clim_27km/A20032007_chlor_a_CLIM_MO_GLOB_27km.nc"
 
 nc <- nc_open(nc_path) # names(nc$var)
 lon <- ncvar_get(nc, "longitude")[,1]
@@ -172,13 +172,14 @@ r_ncvar = function(var){
   r <- flip(r, direction="y")
   r <- setExtent(r, extent(min(lon), max(lon), min(lat), max(lat)))
   crs(r) <- "+proj=longlat +datum=WGS84 +no_defs"
-  return(r)
+  r
 }
 
 env = tibble(var = names(nc$var)) %>%
   filter(str_detect(var, '.*_clim$')) %>%
   mutate(
-    r        = map(var, r_ncvar))
+    r  = map(var, r_ncvar))
+env
 
 r_eez = function(r, eez=esp_s005){
   #browser()
@@ -190,92 +191,81 @@ r_eez = function(r, eez=esp_s005){
   #return(v)
 }
 
+
+# stack approach
 vars = names(nc$var)
 vars = vars[str_detect(vars, '.*_clim$')]
-
-yr = round(mean(c(2003, 2007)))
 s = stack(sapply(vars, function(v) raster(nc_path, varname=v)))
 names(s) = vars
 #names(s) = sprintf('%02d', 1:12)
 lon = ncvar_get(nc, "longitude")[,1]
 lat = ncvar_get(nc, "latitude")[1,]
-s <- flip(s, direction="y")
+s = flip(s, direction='y')
 s <- setExtent(s, extent(min(lon), max(lon), min(lat), max(lat)))
 crs(s) <- "+proj=longlat +datum=WGS84 +no_defs"
+#s = stack(s) # flip converts to brick & cannot extract
+plot(raster(s, vars[1]))
 
-s
-eez=esp_s005
-plot(eez)
-eez_mean = raster::extract(s, eez, fun=mean, na.rm=T)
-eez_sd   = raster::extract(s, eez, fun=sd, na.rm=T)
+eez_sp = eez_s005 %>% as('Spatial')
+eez_sp$GeoName[duplicated(eez_sp$GeoName)]
+plot(eez_sp['GeoName'])
 
+system.time({
+eez_mean = raster::extract(s, eez_sp, fun=mean, na.rm=T, df=T)
+eez_sd   = raster::extract(s, eez_sp, fun=sd, na.rm=T, df=T)
+})
 
-d = eez_mean %>% 
-  as_tibble() %>%
+yr = round(mean(c(2003, 2007)))
+d = eez_sp@data %>%
+  select(MRGID) %>%
   mutate(
-    eez = eez$GeoName) %>%
-  gather(month, mean, -eez) %>%
+    ID = row_number()) %>%
   left_join(
-    eez_sd  %>% 
-      as_tibble() %>%
-      mutate(
-        eez = eez$GeoName) %>%
-      gather(month, sd, -eez),
-    by=c('eez','month')) %>%
+    eez_mean,
+    by='ID') %>%
+  gather(month_etc, mean, -MRGID, -ID) %>% 
+  left_join(
+    eez_sd %>%
+      gather(month_etc, sd, -ID),
+    by=c('ID','month_etc')) %>%
   mutate(
     lwr_sd = mean - sd,
     upr_sd = mean + sd,
-    month = plyr::mapvalues(
-        month,
-        sprintf('%s_chlor_a_clim', month.name),
-        sprintf('%s-%02d-01', yr, 1:12)))
-  View(d)
+    ymd = as.Date(plyr::mapvalues(
+      month_etc,
+      sprintf('%s_chlor_a_clim', month.name),
+      sprintf('%s-%02d-15', yr, 1:12))))
+write_csv(d, sprintf('%s_eez-mean-sd.csv', tools::file_path_sans_ext(nc_path)))
 
-a = d %>%
-  filter(eez=="Spanish Exclusive Economic Zone")
+d = read_csv(sprintf('%s_eez-mean-sd.csv', tools::file_path_sans_ext(nc_path)))
+d = eez_sp@data %>%
+  left_join(d, by='MRGID')
 
-x = xts(a %>% select(-eez,-month,-sd), a$month %>% as.Date())
+#View(d) # names(d)
+library(xts)
+x = d %>%
+  filter(GeoName=="Spanish Exclusive Economic Zone") %>%
+  select(ymd, mean, lwr_sd, upr_sd)
+x = xts(select(x, -ymd), order.by=x$ymd)
 
+library(dygraphs) # install.packages("dygraphs")
 
 #the axis label is passed as a date, this function outputs only the month of the date
 getMonth <- 'function(d){
-               var monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun","Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-               return monthNames[d.getMonth()];
-               }'
+  var monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun","Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return monthNames[d.getMonth()]; }'
 
 #the x values are passed as milliseconds, turn them into a date and extract month and day
 getMonthDay <- 'function(d) {
-                var monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun","Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-                date = new Date(d);
-                //return monthNames[date.getMonth()] + " " +date.getUTCDate(); }
-                return monthNames[date.getMonth()]; }'
+  var monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun","Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  date = new Date(d);
+  //return monthNames[date.getMonth()] + " " +date.getUTCDate(); }
+  return monthNames[date.getMonth()]; }'
 
 dygraph(x, main = "Climatic Chlorophyll (2003 - 2007)") %>%
   dySeries(c('lwr_sd', 'mean', 'upr_sd'), label = "Chl a") %>%
   dyAxis("x",valueFormatter=JS(getMonthDay), axisLabelFormatter=JS(getMonth))
 
-library(dygraphs) # install.packages("dygraphs")
-hw <- HoltWinters(ldeaths)
-p <- predict(hw, n.ahead = 72, prediction.interval = TRUE)
-
-dygraph(p, main = "Predicted Lung Deaths (UK)") %>%
-  dySeries(c("lwr", "fit", "upr"), label = "Deaths")
-
-eez_mean %>% as_tibble()
-
-
-env = env %>%
-  mutate(
-    eez = map_df(r, r_eez))
-
-ez = r_eez(env$r[1])
-
-GeoName
-
-env_eez_mean_1 = extract(env$r[[1]], eez_s005, fun=mean, na.rm=T)
-
-eez = tibble(
-  GeoName = eez_s005$GeoName)
 
 # memory problems with projectRasterForLeaflet
 # tbl = tbl %>%
@@ -303,9 +293,5 @@ for (f in list.files(dir)){
 }
 
 mat = 'ftp://mkavanaugh:MBON@ftp.whoi.edu/MBON/GLOBAL/BETA/SDG14/seascape/MODIS_3VAR_MO9k/GLOBE14_I90VAR3_9k_2002182.mat'
-
-eez_s005 =  %>%
-  geojson_sp() 
-  
 ```
 
