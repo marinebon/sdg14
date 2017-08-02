@@ -64,21 +64,6 @@ cmars_sf = read_sf(cmars_geo)
 mapview(cmars_sf)
 ```
 
-```{r mregions EKS}
-require(mregions)
-require(wellknown) 
-require(jsonlite)
-require(robis)
-
-n <- mr_names("MarineRegions:eez") 
-id <- mr_names_search(n, "Belgian")$id[1] 
-jsonstr <- mr_features_get("MarineRegions:eez", id, format = "json") 
-json <- fromJSON(jsonstr, simplifyVector = FALSE, simplifyDataFrame = FALSE) 
-wkt <- geojson2wkt(json$features[[1]]$geometry)
-taxa <- checklist(geometry = wkt)
-```
-
-
 ```{r get obis pts for cmars poly}
 #occurrence(geometry = st_as_text(st_geometry(cmars)))
 # Error: Request-URI Too Long
@@ -279,6 +264,27 @@ eez_s005_shp    = '~/mbon_data_big/technical/boundaries/eez_derived/eez_s005.shp
 esp_s005_shp    = '~/mbon_data_big/technical/boundaries/eez_derived/esp_s005.shp'
 ```
 
+```{r mregions EKS via Provoost}
+require(mregions)
+require(wellknown) 
+require(jsonlite)
+require(robis)
+
+n <- mr_names("MarineRegions:eez") 
+id <- mr_names_search(n, "Belgian")$id[1] 
+jsonstr <- mr_features_get("MarineRegions:eez", id, format = "json") 
+
+eez_sf = jsonstr %>% geojsonio::as.json() %>% geojsonio::geojson_sp() %>% sf::st_as_sf()
+mapview::mapview(eez_sf)
+plot()
+
+json <- fromJSON(jsonstr, simplifyVector = FALSE, simplifyDataFrame = FALSE) 
+wkt <- geojson2wkt(json$features[[1]]$geometry)
+taxa <- checklist(geometry = wkt)
+```
+
+
+
 ```{r eez wfs}
 # eez_shp = '/Volumes/Best HD/mbon_data_big/technical/boundaries/eez/eez.shp'
 # eez_s005_shp = '/Volumes/Best HD/mbon_data_big/technical/boundaries/eez_derived/eez_s005.shp'
@@ -311,6 +317,33 @@ bbox_ply = function(bb){
 eez_sf = eez_all_sf %>%
   slice(st_intersects(st_bbox(cmars_sf) %>% bbox_ply(), eez_all_sf)[[1]])
 ```
+
+- [ESRI Query (Operation)](https://resources.arcgis.com/en/help/rest/apiref/query.html)
+- [ProtectedPlanet ESRI Web Service Query](http://ec2-54-204-216-109.compute-1.amazonaws.com:6080/arcgis/rest/services/wdpa/wdpa/MapServer/1/query)
+    - [Spatial Reference, Fields](http://ec2-54-204-216-109.compute-1.amazonaws.com:6080/arcgis/rest/services/wdpa/wdpa/MapServer/1)
+
+```{r wdpa}
+bb = st_bbox(cmars_sf)
+# bb = sf[1] %>% st_bbox()
+# bb = sf %>% filter(NAME=='Malpelo') %>% st_bbox()
+
+q_url = 'http://ec2-54-204-216-109.compute-1.amazonaws.com:6080/arcgis/rest/services/wdpa/wdpa/MapServer/1/query'
+
+res = httr::GET(q_url, query = list(
+  f            = 'json',
+  geometry     = sprintf('%0.1f,%0.1f,%0.1f,%0.1f', bb[['xmin']], bb[['ymin']], bb[['xmax']], bb[['ymax']]),
+  geometryType = 'esriGeometryEnvelope',
+  inSR         = 4326,
+  outSR        = 4326,
+  outFields    = '*'))
+
+sf = httr::content(res) %>%
+  read_sf()
+
+#plot(sf)
+mapview(sf)
+```
+
 
 ```{r obis by eez}
 # obis_sf = obis_sf %>% select(-eez_mrgid) # names(obis_sf)
