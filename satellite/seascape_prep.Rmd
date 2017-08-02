@@ -44,7 +44,7 @@ writeRaster(s, grd, overwrite=T)
 ```
 
 
-```{r}
+```{r scrap}
 r <- raster(nc=5, nr=5)
 r[] <- runif(ncell(r)) * 2
 plot(r)
@@ -58,9 +58,8 @@ r[1:5] <- NA
 s[20:25] <- NA
 x <- stack(r, s, rs)
 crosstab(x, useNA=TRUE, long=TRUE)
-```
 
-```{r}
+
 r <- raster(ncol=36, nrow=18)
 r[] <- 1:ncell(r)
 
@@ -83,7 +82,6 @@ w
 unlist(lapply(v, function(x) if (!is.null(x)) mean(x, na.rm=TRUE) else NA ))
 
 v <- raster::extract(r, polys, cellnumbers=TRUE)
-
 ```
 
 
@@ -104,30 +102,32 @@ system.time({
 }) # 2.7 hrs
 
 write_rds(s_e, '/mbon/data_big/satellite/seascapes/gl/gl-seascape-eez-extract.Rdata')
+s_e = read_rds('/mbon/data_big/satellite/seascapes/gl/gl-seascape-eez-extract.Rdata')
 
-yr = round(mean(c(2003, 2007)))
+select = dplyr::select
 d = eez_sp@data %>%
   select(MRGID) %>%
   mutate(
     ID = row_number()) %>%
   left_join(
-    eez_mean,
+    s_e,
     by='ID') %>%
-  gather(month_etc, mean, -MRGID, -ID) %>% 
-  left_join(
-    eez_sd %>%
-      gather(month_etc, sd, -ID),
-    by=c('ID','month_etc')) %>%
+  gather(lyr, category, -MRGID, -ID, -area_km2, na.rm=T) %>%
+  group_by(MRGID, lyr, category) %>%
+  summarize(
+    area_km2 = sum(area_km2)) %>%
   mutate(
-    lwr_sd = mean - sd,
-    upr_sd = mean + sd,
-    ymd = as.Date(plyr::mapvalues(
-      month_etc,
-      sprintf('%s_chlor_a_clim', month.name),
-      sprintf('%s-%02d-15', yr, 1:12))))
-write_csv(d, sprintf('%s_eez-mean-sd.csv', tools::file_path_sans_ext(nc_path)))
+    yj   = str_replace(lyr, 'lyr', ''),
+    date = as.Date(sprintf('%s-01-01', str_sub(yj,1,4))) + days(as.integer(str_sub(yj,5,8))-1)) %>%
+  ungroup() %>%
+  mutate(category = as.integer(category)) %>%
+  arrange(date, MRGID, category) %>%
+  select(date, MRGID, category, area_km2)
 
-d = read_csv(sprintf('%s_eez-mean-sd.csv', tools::file_path_sans_ext(nc_path)))
+d_csv = sprintf('%s_eez-area-km2.csv', tools::file_path_sans_ext(grd))
+write_csv(d, d_csv)
+
+d = read_csv(d_csv)
 d = eez_sp@data %>%
   left_join(d, by='MRGID')
 
@@ -135,8 +135,11 @@ d = eez_sp@data %>%
 library(xts)
 x = d %>%
   filter(GeoName=="Spanish Exclusive Economic Zone") %>%
-  select(ymd, mean, lwr_sd, upr_sd)
-x = xts(select(x, -ymd), order.by=x$ymd)
+  select(date, category, area_km2) %>%
+  mutate(
+    area_km2 = round(area_km2, 1)) %>%
+  spread(category, area_km2, fill=0)
+x = xts(select(x, -date), order.by=x$date)
 
 library(dygraphs) # install.packages("dygraphs")
 
@@ -152,17 +155,49 @@ getMonthDay <- 'function(d) {
   //return monthNames[date.getMonth()] + " " +date.getUTCDate(); }
   return monthNames[date.getMonth()]; }'
 
-dygraph(x, main = "Climatic Chlorophyll (2003 - 2007)") %>%
-  dySeries(c('lwr_sd', 'mean', 'upr_sd'), label = "Chl a") %>%
-  
+lungDeaths <- cbind(mdeaths, fdeaths)
+dygraph(lungDeaths) %>%
   dySeries("mdeaths", label = "Male") %>%
   dySeries("fdeaths", label = "Female") %>%
-  
   dyOptions(stackedGraph = TRUE) %>%
+  dyRangeSelector(height = 20)
+
+
+dygraph(x, main = "Seascapes") %>%
+  # dySeries(c('lwr_sd', 'mean', 'upr_sd'), label = "Chl a") %>%
+  # dySeries("mdeaths", label = "Male") %>%
+  # dySeries("fdeaths", label = "Female") %>%
+  dyOptions(stackedGraph = TRUE) #%>%
 
   dyAxis("x",valueFormatter=JS(getMonthDay), axisLabelFormatter=JS(getMonth))
-  
 ```
+
+```{r}
+x = d %>%
+  filter(GeoName=="Spanish Exclusive Economic Zone") %>%
+  select(date, category, area_km2) %>%
+  mutate(
+    area_km2 = round(area_km2, 1))
+streamgraph(x, category, area_km2, date) %>%
+  sg_legend(show=T, label="Category:") 
+```
+
+
+
+```{r}
+library(babynames)   # install.packages('babynames')
+library(streamgraph) # devtools::install_github('hrbrmstr/streamgraph')
+
+b = babynames %>%
+  filter(grepl("^Kr", name)) %>%
+  group_by(year, name) %>%
+  tally(wt=n) %>%
+  arrange(year, name)
+View(b)
+streamgraph(b, "name", "nn", "year")
+```
+
+
 
 
 ## Maps
