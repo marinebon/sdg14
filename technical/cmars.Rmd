@@ -3,11 +3,20 @@ title: "CMARS EBSA"
 output: html_document
 ---
 
-Rationale:
+Workflow:
 - select ROI, eg CMARS EBSA
 - get obis
-- get EEZ w/in ROI, join obis id
-  - TODO: in/out MPA
+- intersect w/ other subregions:
+  - EEZ, MPAs, EBSAs,...
+  - st_join obis id
+- subsequent analytical aspects
+  - TODO: in/out MPA. simple index?
+    - proportion of obs in/out
+    - filter by RedList, eg more in vs out: ratio for spp > LC (least concern)
+      - drill down by # years obs & recent? **advise on future monitoring**
+      - mgt msg: overlay obs grid w/ hi chl 
+  - compare w/ hi chl / upwelling areas / unique seascapes
+  - TODO: show ecosystem/habitats + cumulative impacts
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
@@ -52,7 +61,23 @@ cols_drop = c(
 ```{r get cmars poly}
 cmars_geo = 'https://chm.cbd.int/api/v2013/documents/FB73B0D1-64FB-367F-405A-51AAA4C060F7/attachments/ETTP_8_EBSA.geojson'
 cmars_sf = read_sf(cmars_geo)
+mapview(cmars_sf)
 ```
+
+```{r mregions EKS}
+require(mregions)
+require(wellknown) 
+require(jsonlite)
+require(robis)
+
+n <- mr_names("MarineRegions:eez") 
+id <- mr_names_search(n, "Belgian")$id[1] 
+jsonstr <- mr_features_get("MarineRegions:eez", id, format = "json") 
+json <- fromJSON(jsonstr, simplifyVector = FALSE, simplifyDataFrame = FALSE) 
+wkt <- geojson2wkt(json$features[[1]]$geometry)
+taxa <- checklist(geometry = wkt)
+```
+
 
 ```{r get obis pts for cmars poly}
 #occurrence(geometry = st_as_text(st_geometry(cmars)))
@@ -60,7 +85,7 @@ cmars_sf = read_sf(cmars_geo)
 # nchar(st_as_text(st_geometry(cmars))) # 120,525
 
 # generalize area for querying obis
-wkt = cmars %>%
+wkt = cmars_sf %>%
   st_buffer(dist=1) %>%
   geojson_json() %>%
   ms_simplify() %>%
@@ -72,8 +97,9 @@ nchar(wkt)  # 21,662 # 727
 
 # get obis data, drop cols
 obis_tbl = occurrence(geometry=wkt) %>% 
-  as_tibble() %>%
-  select_(.dots = setdiff(names(obis), cols_drop)) # names(obis_tbl)
+  as_tibble()
+obis_tbl = obis_tbl %>%
+  select_(.dots = setdiff(names(obis_tbl), cols_drop)) # names(obis_tbl)
 
 # turn obis into sf
 obis_sf = st_sf(
@@ -257,7 +283,9 @@ esp_s005_shp    = '~/mbon_data_big/technical/boundaries/eez_derived/esp_s005.shp
 # eez_shp = '/Volumes/Best HD/mbon_data_big/technical/boundaries/eez/eez.shp'
 # eez_s005_shp = '/Volumes/Best HD/mbon_data_big/technical/boundaries/eez_derived/eez_s005.shp'
 # eez_sf = read_sf(eez_shp) #%>%
-eez_rdata = 'data/eez.rdata'
+# setwd('/mbon/sdg14/technical')
+eez_rdata = '/mbon/sdg14/technical/cache/eez.rdata'
+if (!dir.exists(dirname(eez_rdata))) dir.create(dirname(eez_rdata))
 
 if (!file.exists(eez_rdata)){
   eez_all_sf = read_sf('http://geo.vliz.be/geoserver/MarineRegions/ows?service=WFS&version=1.0.0&request=GetFeature&typeName=MarineRegions:eez&maxFeatures=300') # 2.2 min
