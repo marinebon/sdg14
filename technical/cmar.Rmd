@@ -485,13 +485,17 @@ o %>%
 table(o$status, useNA = 'ifany')
 
 o %>%
-  filter(status %in% c('NT','VU','EN','CR','EX')) %>% # skipping: <NA>,DD,LC
-  mutate(
-    IUCN_concerned = 
-  )
-  group_by(taxonomicgroup) %>%
-
-
+  #filter(status %in% c('NT','VU','EN','CR','EX')) %>% # skipping: <NA>,DD,LC
+  group_by(taxonomicgroup, status) %>%
+  summarize(n = n()) %>%
+  left_join(
+    o %>%
+      group_by(taxonomicgroup) %>%
+      summarize(n_taxonomicgroup = n()),
+    by='taxonomicgroup') %>%
+  arrange(desc(n_taxonomicgroup, n)) %>%  
+  datatable() %>%
+    formatCurrency(c('n','n_taxonomicgroup'), currency='', digits=0)
 ```
 
 
