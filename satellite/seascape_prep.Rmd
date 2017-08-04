@@ -13,7 +13,8 @@ library(lubridate)
 if (basename(getwd()) != 'docs') setwd('docs')
 
 dir_mat = '/mbon/data_big/satellite/seascapes/gl'
-grd = file.path(dir_mat, '/GLOBE14_I90VAR3_9k.grd')
+grd   = file.path(dir_mat, 'GLOBE14_I90VAR3_9k.grd')
+grd_l = file.path(dir_mat, 'GLOBE14_I90VAR3_9k_leaflet.grd')
 
 mats = tibble(
   mat = list.files(dir_mat, '\\.mat$')) %>%
@@ -41,6 +42,17 @@ names(s) = mats$lyr
 #names(s)
 #plot(raster(s, lyr))
 writeRaster(s, grd, overwrite=T)
+
+# raster stack for leaflet
+s = stack(grd)
+s_l = leaflet::projectRasterForLeaflet(s)
+
+# rename layers to dates, using mid-month day of 15th
+yjs   = str_replace(names(s), 'lyr', '')
+dates = as.Date(sprintf('%s-01-15', str_sub(yjs,1,4))) + days(as.integer(str_sub(yjs,5,8))-1)
+names(s_l) = format(dates, 'ymd_%Y.%m.%d')
+
+writeRaster(s_l, grd_l, overwrite=T)
 ```
 
 
@@ -124,7 +136,10 @@ d = eez_sp@data %>%
   arrange(date, MRGID, category) %>%
   select(date, MRGID, category, area_km2)
 
-d_csv = sprintf('%s_eez-area-km2.csv', tools::file_path_sans_ext(grd))
+#list.files('/mbon/data_big/satellite/seascapes/gl/')
+#d0_csv = sprintf('%s_eez-area-km2.csv', tools::file_path_sans_ext(grd))
+d_csv = sprintf('%s_leaflet_eez-area-km2.csv', tools::file_path_sans_ext(grd))
+#file.rename(d_0csv, d_csv)
 write_csv(d, d_csv)
 
 d = read_csv(d_csv)
@@ -172,19 +187,32 @@ dygraph(x, main = "Seascapes") %>%
   dyAxis("x",valueFormatter=JS(getMonthDay), axisLabelFormatter=JS(getMonth))
 ```
 
-```{r}
+```{r streamgraph}
+library(streamgraph)
+select = dplyr::select
 x = d %>%
   filter(GeoName=="Spanish Exclusive Economic Zone") %>%
   select(date, category, area_km2) %>%
+  arrange(category, date) %>%
   mutate(
-    area_km2 = round(area_km2, 1))
+    area_km2 = round(area_km2, 1),
+    category = factor(as.character(category), as.character(1:14), ordered=T)) %>%
+  as_tibble()
+x
+x$category
+
+pal = colorNumeric('Spectral', 1:14, na.color='transparent')
+
 streamgraph(x, category, area_km2, date) %>%
-  sg_legend(show=T, label="Category:") 
+  sg_legend(show=T, label="Category:") %>%
+  sg_fill_manual(pal(1:14))
+  #sg_colors('Spectral')
+  
 ```
 
 
 
-```{r}
+```{r streamgraph babynames}
 library(babynames)   # install.packages('babynames')
 library(streamgraph) # devtools::install_github('hrbrmstr/streamgraph')
 
@@ -198,6 +226,59 @@ streamgraph(b, "name", "nn", "year")
 ```
 
 
+```{r prep chl}
+chl_dir = '/mbon/data_big/satellite/chlor_a/clim_27km'
+chl_nc = list.files(chl_dir, '.*\\.nc$', full.names=T)
+  
+for (nc_path in chl_nc){ # nc_path = chl_nc[1]
+  
+  grd   = sprintf('%s.grd', tools::file_path_sans_ext(nc_path))
+  grd_l = sprintf('%s_leaflet.grd', tools::file_path_sans_ext(nc_path))
+  
+  if (!file.exists(grd)){
+  
+    # fetch nc
+    nc = nc_open(nc_path)
+    lon = ncvar_get(nc, 'longitude')[,1]
+    lat = ncvar_get(nc, 'latitude')[1,]
+    vars = str_subset(names(nc$var), '.*_chlor_a_clim$')
+    
+    # extract rasters
+    s = stack(raster(nc_path, varname=vars[1]))
+    for (v in vars[-1]){
+      s = stack(s, raster(nc_path, varname=v))
+    }
+    names(s) = vars
+    
+    # realign spatial
+    s = flip(s, direction='y')
+    s <- setExtent(s, extent(min(lon), max(lon), min(lat), max(lat)))
+    crs(s) <- leaflet:::epsg4326
+    
+    # write out
+    writeRaster(s, grd, overwrite=T)
+  }
+  
+  # rasters for leaflet
+  #if (!file.exists(grd_l)){
+  if (T){
+  #if (nc_path != '/mbon/data_big/satellite/chlor_a/clim_27km/A20032007_chlor_a_CLIM_MO_GLOB_27km.nc'){
+    s = stack(grd)
+    s_l = leaflet::projectRasterForLeaflet(s)
+
+    # rename layers to dates, using mid-month day of 15th
+    yr = 2005
+    # TODO: vary yr with input grd based on filename
+    dates = as.Date(plyr::mapvalues(
+      names(s),
+      sprintf('%s_chlor_a_clim', month.name),
+      sprintf('%s-%02d-15', yr, 1:12)))
+    names(s_l) = format(dates, 'ymd_%Y.%m.%d')
+
+    writeRaster(s_l, grd_l, overwrite=T)
+  }
+}
+```
 
 
 ## Maps

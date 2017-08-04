@@ -43,14 +43,16 @@ Workflow:
 knitr::opts_chunk$set(echo=T, message=F, warning=F)
 library(tidyverse)
 library(sf)
+library(geosphere)
 library(mapview)
 library(robis) # devtools::install_github('iobis/robis')
 library(robis2) # devtools::install_github('iobis/robis2')
 library(rmapshaper)
 library(geojsonio)
 library(scales)
-#library(DT)
+library(DT)
 library(leaflet)
+library(htmltools)
 
 if (basename(getwd()) != 'technical') setwd('technical')
 
@@ -63,6 +65,7 @@ occ_geo          = 'cache/cmar_occ.geojson'
 eez_rdata        = 'cache/eez.rdata'
 eez_geo          = 'cache/cmar_eez.geojson'
 wdpa_geo         = 'cache/cmar_wdpa.geojson'
+wdpa_eez_geo     = 'cache/cmar_wdpa_eez.geojson'
 occ_eez_wdpa_csv = 'cache/cmar_occ_eez_wdpa.csv'
 ```
 
@@ -160,10 +163,10 @@ Above are the first 6 of `r occ_nwkt %>% comma()` records from the generalized W
 
 ```{r get obis checklist for roi}
 if (!file.exists(occ_cklist_csv)){
-  cklist = robis::checklist(geometry=roi_wkt) # 1.6 min  
+  occ_cklist = robis::checklist(geometry=roi_wkt) # 1.6 min  
   
   # get unique taxonomic name (tname), prioritizing beyond with first non-NA of: valid, worms_id, redlist, status, phylum,...
-  cklist = cklist %>%
+  occ_cklist = occ_cklist %>%
     mutate(
       invalid = valid_id != id) %>%
     arrange(tname,invalid,worms_id,redlist,status,phylum,class,order,family,genus,species) %>%
@@ -185,27 +188,27 @@ if (!file.exists(occ_cklist_csv)){
       wktpoly_sum_records  = sum(records),
       wktpoly_sum_datasets = sum(datasets))
   
-  write_csv(cklist, occ_cklist_csv)
+  write_csv(occ_cklist, occ_cklist_csv)
 }
-cklist = read_csv(occ_cklist_csv)
+occ_cklist = read_csv(occ_cklist_csv)
 ```
 
-```{r cklist debug, eval=F}
+```{r occ_cklist debug, eval=F}
 occ_head = head(occ_tbl)
 View(occ_head)
 table(occ_tbl$taxonomicgroup, useNA='ifany') # 0 NAs
 # occ_tbl$taxonomicgroup YES!
 
-sum(duplicated(cklist$id)) # 0
-sum(duplicated(cklist$worms_id)) # 154
-sum(duplicated(cklist$tname[duplicated(cklist$tname)])) # 0
+sum(duplicated(occ_cklist$id)) # 0
+sum(duplicated(occ_cklist$worms_id)) # 154
+sum(duplicated(occ_cklist$tname[duplicated(occ_cklist$tname)])) # 0
 
-cklist_worms_dupes = cklist %>% 
+occ_cklist_worms_dupes = occ_cklist %>% 
   filter(
-    worms_id %in% cklist$worms_id[duplicated(cklist$worms_id)] |
-    tname %in% cklist$tname[duplicated(cklist$tname)]) %>%
+    worms_id %in% occ_cklist$worms_id[duplicated(occ_cklist$worms_id)] |
+    tname %in% occ_cklist$tname[duplicated(occ_cklist$tname)]) %>%
   arrange(worms_id)
-View(cklist_worms_dupes)
+View(occ_cklist_worms_dupes)
 ```
 
 ## Convert OBIS occcurrences to points and filter
@@ -299,20 +302,39 @@ bbox_ply = function(bb){
 
 if (!file.exists(eez_geo)){
 
-  # filter by eez's within bounding box of roi
+  # filter by eez's within roi
   eez_sf = eez_all_sf %>%
-    slice(st_intersects(st_bbox(roi_sf) %>% bbox_ply(), eez_all_sf)[[1]])
+    slice(st_intersects(st_bbox(roi_sf) %>% bbox_ply(), eez_all_sf)[[1]]) %>%
+    st_intersection(roi_sf %>% select())
+  
+  # update areas
+  eez_sf = eez_sf %>%
+    rename(
+      area_eezall_km2 = area_km2) %>%
+    mutate(
+      area_eezroi_km2 = st_area(st_geometry(eez_sf)))
   
   write_sf(eez_sf, eez_geo, delete_dsn=T)
 }
 eez_sf = read_sf(eez_geo)
+
+labels <- with(
+  eez_sf,
+  sprintf(
+  "<strong>%s - %s</strong><br/>area_eezroi_km2: %s<br/>area_eezroi_km2: %s",
+  sovereign1, territory1, comma(round(area_eezroi_km2,2)), comma(round(area_eezall_km2,2)))) %>% lapply(HTML)
 
 leaflet(roi_sf) %>%
   addProviderTiles(providers$Stamen.TonerLite) %>%
   addPolygons() %>%
   addPolygons(
     data = eez_sf,
-    color = 'red', fillColor = 'red')
+    color = 'red', fillColor = 'red',
+    label = labels,
+    highlight = highlightOptions(
+      color = 'yellow',
+      weight = 5,
+      bringToFront = T))
 ```
 
 ## Fetch MPAs in ROI
@@ -335,21 +357,78 @@ if (!file.exists(wdpa_geo)){
   wdpa_sf = httr::content(res) %>%
     read_sf() # wdpa0_sf = wdpa_sf; mapview(wdpa0_sf)
   
-  # filter by eez's intersecting the roi polygon
+  # filter by eez's within roi
   wdpa_sf = wdpa_sf %>%
-    slice(st_intersects(roi_sf, wdpa_sf)[[1]]) # mapview(wdpa_sf)
-  
-  write_sf(wdpa_sf, wdpa_geo)
+    slice(st_intersects(roi_sf, wdpa_sf)[[1]])
+  wdpa_sf = wdpa_sf %>%
+    mutate(
+      area_wdpaall_km2 = st_area(st_geometry(wdpa_sf)))
+  wdpa_sf = wdpa_sf %>%
+    st_intersection(roi_sf %>% select())
+  wdpa_sf = wdpa_sf %>%
+    mutate(
+      area_wdparoi_km2 = st_area(st_geometry(wdpa_sf)))
+
+  write_sf(wdpa_sf, wdpa_geo, delete_dsn=T)
 }
 wdpa_sf = read_sf(wdpa_geo)
   
+labels <- with(
+  wdpa_sf,
+  sprintf(
+  "<strong>%s</strong><br/>DESIG_ENG: %s<br/>DESIG_TYPE: %s<br/>IUCN CAT: %s<br/>GIS_M_AREA: %s",
+  NAME, DESIG_ENG, DESIG_TYPE, IUCN_CAT, comma(round(GIS_M_AREA,2)))) %>% lapply(HTML)
+
 leaflet(roi_sf) %>%
   addProviderTiles(providers$Stamen.TonerLite) %>%
   addPolygons() %>%
   addPolygons(
     data = wdpa_sf,
-    color = 'green', fillColor = 'green')
+    weight = 1,
+    color = 'green', fillColor = 'green',
+    label = labels,
+    highlight = highlightOptions(
+      color = 'yellow',
+      weight = 5,
+      bringToFront = T))
 ```
+
+## MPAs in EEZs
+
+```{r}
+if (!file.exists(wdpa_eez_geo)){
+  wdpa_eez_sf = wdpa_sf %>%
+    st_intersection(eez_sf)
+  
+  write_sf(wdpa_eez_sf, wdpa_eez_geo, delete_dsn=T)
+}
+wdpa_eez_sf = read_sf(wdpa_eez_geo)
+
+labels = with(
+  wdpa_eez_sf,
+  sprintf(
+  "<strong>%s</strong> in <strong>%s - %s</strong><br/>DESIG_ENG: %s<br/>DESIG_TYPE: %s<br/>IUCN CAT: %s<br/>GIS_M_AREA: %s",
+  NAME, sovereign1, territory1, DESIG_ENG, DESIG_TYPE, IUCN_CAT, comma(round(GIS_M_AREA,2)))) %>% lapply(HTML)
+
+wdpa_eez_sf$sovereign1 = factor(wdpa_eez_sf$sovereign1)
+pal = colorFactor('Spectral', wdpa_eez_sf$sovereign1)
+
+leaflet(roi_sf) %>%
+  addProviderTiles(providers$Stamen.TonerLite) %>%
+  addPolygons(
+    weight = 0.5,
+    opacity = 0.2) %>%
+  addPolygons(
+    data = wdpa_eez_sf,
+    weight = 1,
+    fillColor = ~pal(sovereign1), # color = ~pal(sovereign1), 
+    label = labels,
+    highlight = highlightOptions(
+      color = 'yellow',
+      weight = 5,
+      bringToFront = T))
+```
+
 
 ## Spatial Join EEZ & WDPA to OBIS occurrences
 
@@ -358,22 +437,62 @@ Spatially identify the EEZ and WDPA for each OBIS occurrence.
 ```{r obis by eez & wdpa}
 if (!file.exists(occ_eez_wdpa_csv)){
   o_sf = occ_sf %>%
-    select(id) %>%
+    select(occ_id=id) %>%
     st_join(
       eez_sf %>% 
-        select(gml_id)) %>%
+        select(eez_gml_id=gml_id)) %>%
     st_join(
       wdpa_sf %>% 
-        select(WDPA_PID)) # 4.9 min
+        select(wdpa_pid = WDPA_PID)) # 4.9 min
   
   o_sf %>%
     st_set_geometry(NULL) %>%
     write_csv(occ_eez_wdpa_csv)
 }
 occ_eez_wdpa = read_csv(occ_eez_wdpa_csv)
+
+occ_eez_wdpa %>%
+  head()
 ```
 
+## Summarize OBIS by EEZ, WDPA, IUCN
 
+```{r}
+o = occ_tbl %>% 
+  left_join(
+    occ_cklist, 
+    by=c('scientificName'='tname')) %>%
+  left_join(
+    occ_eez_wdpa, 
+    by=c('id'='occ_id')) %>%
+  left_join(
+    eez_sf %>%
+      st_set_geometry(NULL), 
+    by=c('eez_gml_id'='gml_id')) %>%
+  left_join(
+    wdpa_sf %>%
+      mutate(WDPA_PID = as.integer(WDPA_PID)) %>%
+      st_set_geometry(NULL), 
+    by=c('wdpa_pid'='WDPA_PID'))
+
+o %>%
+  group_by(taxonomicgroup) %>%
+  summarize(n = n()) %>%
+  arrange(desc(n)) %>%
+  datatable() %>%
+    formatCurrency('n', currency='', digits=0) 
+
+table(o$status, useNA = 'ifany')
+
+o %>%
+  filter(status %in% c('NT','VU','EN','CR','EX')) %>% # skipping: <NA>,DD,LC
+  mutate(
+    IUCN_concerned = 
+  )
+  group_by(taxonomicgroup) %>%
+
+
+```
 
 
 
