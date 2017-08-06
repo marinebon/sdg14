@@ -48,8 +48,8 @@ navbar:
           href: edna-fk.html
     - text: "Connectivity"
       menu:
-        - text: "Sanctuaries Larval Connectivity"
-          href: map-sbc.html
+        - text: "Gray's Reef Larval Connectivity"
+          href: conn-gr.html
 output_dir: "."
 output:
   html_document:
