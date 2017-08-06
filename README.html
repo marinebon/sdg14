@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+
+<head>
+
+<meta charset="utf-8" />
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="generator" content="pandoc" />
+
+
+
+
+<title></title>
+
+<script src="site_libs/jquery-1.11.3/jquery.min.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link href="site_libs/bootstrap-3.3.5/css/cosmo.min.css" rel="stylesheet" />
+<script src="site_libs/bootstrap-3.3.5/js/bootstrap.min.js"></script>
+<script src="site_libs/bootstrap-3.3.5/shim/html5shiv.min.js"></script>
+<script src="site_libs/bootstrap-3.3.5/shim/respond.min.js"></script>
+<script src="site_libs/navigation-1.1/tabsets.js"></script>
+<link href="site_libs/highlightjs-1.1/textmate.css" rel="stylesheet" />
+<script src="site_libs/highlightjs-1.1/highlight.js"></script>
+
+<style type="text/css">code{white-space: pre;}</style>
+<style type="text/css">
+  pre:not([class]) {
+    background-color: white;
+  }
+</style>
+<script type="text/javascript">
+if (window.hljs && document.readyState && document.readyState === "complete") {
+   window.setTimeout(function() {
+      hljs.initHighlighting();
+   }, 0);
+}
+</script>
+
+
+
+<style type="text/css">
+h1 {
+  font-size: 34px;
+}
+h1.title {
+  font-size: 38px;
+}
+h2 {
+  font-size: 30px;
+}
+h3 {
+  font-size: 24px;
+}
+h4 {
+  font-size: 18px;
+}
+h5 {
+  font-size: 16px;
+}
+h6 {
+  font-size: 12px;
+}
+.table th:not([align]) {
+  text-align: left;
+}
+</style>
+
+
+</head>
+
+<body>
+
+<style type = "text/css">
+.main-container {
+  max-width: 940px;
+  margin-left: auto;
+  margin-right: auto;
+}
+code {
+  color: inherit;
+  background-color: rgba(0, 0, 0, 0.04);
+}
+img {
+  max-width:100%;
+  height: auto;
+}
+.tabbed-pane {
+  padding-top: 12px;
+}
+button.code-folding-btn:focus {
+  outline: none;
+}
+</style>
+
+
+<style type="text/css">
+/* padding for bootstrap navbar */
+body {
+  padding-top: 51px;
+  padding-bottom: 40px;
+}
+/* offset scroll position for anchor links (for fixed navbar)  */
+.section h1 {
+  padding-top: 56px;
+  margin-top: -56px;
+}
+
+.section h2 {
+  padding-top: 56px;
+  margin-top: -56px;
+}
+.section h3 {
+  padding-top: 56px;
+  margin-top: -56px;
+}
+.section h4 {
+  padding-top: 56px;
+  margin-top: -56px;
+}
+.section h5 {
+  padding-top: 56px;
+  margin-top: -56px;
+}
+.section h6 {
+  padding-top: 56px;
+  margin-top: -56px;
+}
+</style>
+
+<script>
+// manage active state of menu based on current page
+$(document).ready(function () {
+  // active menu anchor
+  href = window.location.pathname
+  href = href.substr(href.lastIndexOf('/') + 1)
+  if (href === "")
+    href = "index.html";
+  var menuAnchor = $('a[href="' + href + '"]');
+
+  // mark it active
+  menuAnchor.parent().addClass('active');
+
+  // if it's got a parent navbar menu mark it active as well
+  menuAnchor.closest('li.dropdown').addClass('active');
+});
+</script>
+
+
+<div class="container-fluid main-container">
+
+<!-- tabsets -->
+<script>
+$(document).ready(function () {
+  window.buildTabsets("TOC");
+});
+</script>
+
+<!-- code folding -->
+
+
+
+
+
+
+<div class="navbar navbar-default  navbar-fixed-top" role="navigation">
+  <div class="container">
+    <div class="navbar-header">
+      <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#navbar">
+        <span class="icon-bar"></span>
+        <span class="icon-bar"></span>
+        <span class="icon-bar"></span>
+      </button>
+      <a class="navbar-brand" href="index.html">MBON SDG14 Apps</a>
+    </div>
+    <div id="navbar" class="navbar-collapse collapse">
+      <ul class="nav navbar-nav">
+        <li>
+  <a href="index.html">Home</a>
+</li>
+<li>
+  <a href="about.html">About</a>
+</li>
+<li class="dropdown">
+  <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-expanded="false">
+    Biodiversity
+     
+    <span class="caret"></span>
+  </a>
+  <ul class="dropdown-menu" role="menu">
+    <li>
+      <a href="info-gl.html">Global Biodiversity</a>
+    </li>
+    <li>
+      <a href="bio-cmar.html">CMAR Biodiversity</a>
+    </li>
+    <li>
+      <a href="map-sbc.html">Santa Barbara Dataset Mapper</a>
+    </li>
+  </ul>
+</li>
+<li class="dropdown">
+  <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-expanded="false">
+    Satellite
+     
+    <span class="caret"></span>
+  </a>
+  <ul class="dropdown-menu" role="menu">
+    <li>
+      <a href="env-gl.html">Global Satellite Explorer</a>
+    </li>
+  </ul>
+</li>
+<li class="dropdown">
+  <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-expanded="false">
+    eDNA
+     
+    <span class="caret"></span>
+  </a>
+  <ul class="dropdown-menu" role="menu">
+    <li>
+      <a href="edna-fk.html">Florida Keys eDNA</a>
+    </li>
+  </ul>
+</li>
+<li class="dropdown">
+  <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-expanded="false">
+    Connectivity
+     
+    <span class="caret"></span>
+  </a>
+  <ul class="dropdown-menu" role="menu">
+    <li>
+      <a href="map-sbc.html">Sanctuaries Larval Connectivity</a>
+    </li>
+  </ul>
+</li>
+      </ul>
+      <ul class="nav navbar-nav navbar-right">
+        
+      </ul>
+    </div><!--/.nav-collapse -->
+  </div><!--/.container -->
+</div><!--/.navbar -->
+<style type = "text/css">
+.main-container {
+  max-width: none;
+}
+</style>
+
+<div class="fluid-row" id="header">
+
+
+
+
+</div>
+
+
+<div id="sdg14" class="section level1">
+<h1>sdg14</h1>
+<p>Products for Sustainable Development Goal 14 on Life in the Sea from MBON (Marine Biodiversity Observation Network)</p>
+<div id="overview" class="section level2">
+<h2>Overview</h2>
+<p>This repository was setup to version and collaborate on code and small data files subsequent to the March 15-17, 2017 meeting in St Petersburg, FL.</p>
+<p>We have three ways of sharing files:</p>
+<ol style="list-style-type: decimal">
+<li><p><strong>Google Drive</strong> in <a href="http://bit.ly/sdg14mbon">bit.ly/sdg14mbon</a>: simple, easy notes/presentations/spreadsheets, works well for most</p></li>
+<li><p><strong>Github</strong> <a href="http://github.com/marinebon/sdg14">marinebon/sdg14</a>: versioned scripts, csv’s (small data), etc</p></li>
+<li><p><strong>Server</strong> <code>mbon.marine.usf.edu</code>: big data files</p></li>
+</ol>
+</div>
+<div id="folder-organization" class="section level2">
+<h2>Folder Organization</h2>
+<p>Subfolders are currently organized by teams:</p>
+<ol style="list-style-type: decimal">
+<li>biodiversity</li>
+<li>infographics</li>
+<li>satellite</li>
+<li>technical</li>
+</ol>
+</div>
+<div id="large-files-on-server" class="section level2">
+<h2>Large Files on Server</h2>
+<p>Github limits free, public repositories to 1 GB total with a per file limit of 100 MB (and warning &gt; 50 MB). Any files larger than 50 MB, I strongly recommend storing on our server <code>mbon.marine.usf.edu</code> in the <code>/mbon/data_big</code> folder.</p>
+<pre><code>├── data_big
+│   ├── biodiversity
+│   ├── infographics
+│   ├── satellite
+│   └── technical
+└── sdg14
+    ├── biodiversity
+    ├── infographics
+    ├── satellite
+    │   ├── data_small
+    │   │   └── climate_indices
+    └── technical</code></pre>
+<p>Note how the sdg14 Github repo is cloned and available to update (<code>git pull</code>; <code>git commit; git push</code>).</p>
+<p>To get an account on the server, please fill out your info on this spreadsheet:</p>
+<p><a href="https://docs.google.com/spreadsheets/d/1KEH0dyjQemg_Tfik0dIIyQ30cqQ1eRcWTaMuZwUO49U/edit#gid=0">Github &amp; mbon.marine.usf.edu accounts - Google Sheets</a></p>
+<p>For easily transferring files between server and client via SFTP, I recommend <a href="https://cyberduck.io/?l=en">CyberDuck</a> for any platform (Windows / Mac / Linux).</p>
+</div>
+<div id="software-setup" class="section level2">
+<h2>Software Setup</h2>
+<p>For a quick primer on getting setup with Git, Github and RStudio, please see:</p>
+<p><a href="https://marinebon.github.io/help/setup.html">marinebon.github.io/help</a></p>
+<p>We will be expanding documentation here in the near future.</p>
+</div>
+<div id="mbon-server-access-points" class="section level2">
+<h2>mbon server access points</h2>
+<ul>
+<li><a href="http://mbon.marine.usf.edu:8787/auth-sign-in?error=1">Rstudio log in</a></li>
+<li><a href="http://mbon.marine.usf.edu:8080/pgstudio/">PostgreSQL studio log in</a></li>
+<li><a href="http://mbon.marine.usf.edu:3838/">shiny apps root dir</a>
+<ul>
+<li><a href="http://mbon.marine.usf.edu:3838/test/">shiny app test</a></li>
+</ul></li>
+</ul>
+</div>
+</div>
+
+
+
+
+</div>
+
+<script>
+
+// add bootstrap table styles to pandoc tables
+function bootstrapStylePandocTables() {
+  $('tr.header').parent('thead').parent('table').addClass('table table-condensed');
+}
+$(document).ready(function () {
+  bootstrapStylePandocTables();
+});
+
+
+</script>
+
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+  (function () {
+    var script = document.createElement("script");
+    script.type = "text/javascript";
+    script.src  = "https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML";
+    document.getElementsByTagName("head")[0].appendChild(script);
+  })();
+</script>
+
+</body>
+</html>
