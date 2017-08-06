@@ -1,5 +1,5 @@
 ---
-title: "CMAR EBSA"
+title: "ROI EBSA"
 output:
   html_document:
     toc: true
@@ -14,7 +14,7 @@ output:
 
 Workflow:
 
-- select ROI, eg CMAR EBSA
+- select region of interest (ROI), eg CMAR EBSA
 - get obis
 - intersect w/ other subregions:
     - EEZ, MPAs, EBSAs,...
@@ -56,17 +56,23 @@ library(htmltools)
 
 if (basename(getwd()) != 'technical') setwd('technical')
 
-roi_url          = 'https://chm.cbd.int/api/v2013/documents/FB73B0D1-64FB-367F-405A-51AAA4C060F7/attachments/ETTP_8_EBSA.geojson'
-roi_geo          = 'cache/cmar.geojson'
-occ_csv          = 'cache/cmar_occ.csv'
-occ_cklist_csv   = 'cache/cmar_occ_checklist.csv'
-occ_txt          = 'cache/cmar_occ_nwkt.txt'
-occ_geo          = 'cache/cmar_occ.geojson'
+#roi              = 'cmar'
+#roi_url          = 'https://chm.cbd.int/api/v2013/documents/FB73B0D1-64FB-367F-405A-51AAA4C060F7/attachments/ETTP_8_EBSA.geojson'
+roi              = 'clipperton'
+roi_url          = 'https://chm.cbd.int/api/v2013/documents/494D9489-5D08-524D-84AE-AD6817304655/attachments/ETTP_2_EBSA.geojson'
+roi_geo          = sprintf('cache/%s.geojson', roi)
+occ_csv          = sprintf('cache/%s_occ.csv', roi)
+occ_cklist_csv   = sprintf('cache/%s_occ_checklist.csv', roi)
+occ_txt          = sprintf('cache/%s_occ_nwkt.txt', roi)
+occ_geo          = sprintf('cache/%s_occ.geojson', roi)
 eez_rdata        = 'cache/eez.rdata'
-eez_geo          = 'cache/cmar_eez.geojson'
-wdpa_geo         = 'cache/cmar_wdpa.geojson'
-wdpa_eez_geo     = 'cache/cmar_wdpa_eez.geojson'
-occ_eez_wdpa_csv = 'cache/cmar_occ_eez_wdpa.csv'
+eez_geo          = sprintf('cache/%s_eez.geojson', roi)
+wdpa_geo         = sprintf('cache/%s_wdpa.geojson', roi)
+wdpa_eez_geo     = sprintf('cache/%s_wdpa_eez.geojson', roi)
+occ_eez_wdpa_csv = sprintf('cache/%s_occ_eez_wdpa.csv', roi)
+
+library(mapedit)
+mapedit()
 ```
 
 ## Fetch EBSA
@@ -213,7 +219,7 @@ View(occ_cklist_worms_dupes)
 
 ## Convert OBIS occcurrences to points and filter
 
-Next, convert the table having decimalLongitude and decimalLatitude into points and filter out points that were in the generalized WKT but not the original CMAR polygon.
+Next, convert the table having decimalLongitude and decimalLatitude into points and filter out points that were in the generalized WKT but not the original ROI polygon.
 
 ```{r convert obis tbl to pts within roi poly, message=F}
 if (!file.exists(occ_geo)){
@@ -256,13 +262,13 @@ leaflet(occ_sf) %>%
     clusterOptions = markerClusterOptions())
 ```
 
-Above are the OBIS occurrence points, filtered to the original CMAR polygon (`r occ_nwkt %>% comma()` to `r nrow(occ_sf) %>% comma()` records). Click on the marker cluster to zoom and explode into finer clusters and eventually individual points.
+Above are the OBIS occurrence points, filtered to the original ROI polygon (`r occ_nwkt %>% comma()` to `r nrow(occ_sf) %>% comma()` records). Click on the marker cluster to zoom and explode into finer clusters and eventually individual points.
 
-## Fetch EEZs within CMAR
+## Fetch EEZs within ROI
 
-Get the exclusive economic zones (EEZs) within the CMAR region of interest to get at areas of political interest and management.
+Get the exclusive economic zones (EEZs) within the ROI region of interest to get at areas of political interest and management.
 
-If we already knew the country EEZs that overlapped with the CMAR region, we could use the unevaluated code below that Eduardo Klein Sala shared originally from Pieter Provost using the [mregions](https://github.com/ropenscilabs/mregions) package. 
+If we already knew the country EEZs that overlapped with the ROI region, we could use the unevaluated code below that Eduardo Klein Sala shared originally from Pieter Provost using the [mregions](https://github.com/ropenscilabs/mregions) package. 
 
 ```{r mregions from Pieter Provoost via Eduardo Klein Sala, eval=F}
 library(mregions)
@@ -278,7 +284,7 @@ eez_sf = eez_json %>%
 mapview(eez_sf)
 ```
 
-However am attempting to generalize this analysis so that CMAR could be swapped for any region of interest. In that case we need to fetch the entire EEZ dataset (takes ~ 2 min by hitting the MarineRegions.org WFS server at VLIZ.be) and subset based on intersecting EEZs. If the `mr_records_by_type()` or other function in the mregions package were complete with the bounding box fields (`minLatitude`, `minLongitude`, `maxLatitude`, `maxLongitude`) we wouldn't need to do this.
+However am attempting to generalize this analysis so that ROI could be swapped for any region of interest. In that case we need to fetch the entire EEZ dataset (takes ~ 2 min by hitting the MarineRegions.org WFS server at VLIZ.be) and subset based on intersecting EEZs. If the `mr_records_by_type()` or other function in the mregions package were complete with the bounding box fields (`minLatitude`, `minLongitude`, `maxLatitude`, `maxLongitude`) we wouldn't need to do this.
 
 ```{r fetch entire EEZ via WFS}
 if (!file.exists(eez_rdata)){
@@ -339,7 +345,7 @@ leaflet(roi_sf) %>%
 
 ## Fetch MPAs in ROI
 
-We can use the [Protected Planet](https://www.protectedplanet.net/) [ESRI Web Service Query](http://ec2-54-204-216-109.compute-1.amazonaws.com:6080/arcgis/rest/services/wdpa/wdpa/MapServer/1/query) to construct an [ESRI Query (Operation)](https://resources.arcgis.com/en/help/rest/apiref/query.html) on the bounding box of the CMAR region. This could be limited to the [fields](http://ec2-54-204-216-109.compute-1.amazonaws.com:6080/arcgis/rest/services/wdpa/wdpa/MapServer/1) available.
+We can use the [Protected Planet](https://www.protectedplanet.net/) [ESRI Web Service Query](http://ec2-54-204-216-109.compute-1.amazonaws.com:6080/arcgis/rest/services/wdpa/wdpa/MapServer/1/query) to construct an [ESRI Query (Operation)](https://resources.arcgis.com/en/help/rest/apiref/query.html) on the bounding box of the ROI region. This could be limited to the [fields](http://ec2-54-204-216-109.compute-1.amazonaws.com:6080/arcgis/rest/services/wdpa/wdpa/MapServer/1) available.
 
 ```{r fetch wdpa within roi, message=F}
 q_url = 'http://ec2-54-204-216-109.compute-1.amazonaws.com:6080/arcgis/rest/services/wdpa/wdpa/MapServer/1/query'
