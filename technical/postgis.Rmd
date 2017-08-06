@@ -1,0 +1,306 @@
+---
+title: "PostGIS Setup"
+author: "Ben Best"
+output: html_document
+date: "`r format(Sys.time(), '%Y-%m-%d')`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T, eval=F)
+```
+
+## Technical Links
+
+- [ecohealthalliance/fasterize: Fast vector <--> raster conversion for modern R spatial data 🚀🌏▦](https://github.com/ecohealthalliance/fasterize)
+
+## Install Apps
+
+Using PostGIS since big features.
+
+Installed:
+
+- [Postgres.app](http://postgresapp.com/) – the easiest way to get started with PostgreSQL on the Mac
+
+- [pgAdmin](https://www.postgresql.org/ftp/pgadmin3/pgadmin4/v1.1/macos/) GUI
+
+## Brew & Start PostGIS
+
+```bash
+sudo chown -R `whoami`:admin /usr/local/share
+brew link lzlib
+brew install postgis
+# start manually
+pg_ctl -D /usr/local/var/postgres -l /usr/local/var/postgres/server.log start
+# stop manually
+pg_ctl -D /usr/local/var/postgres stop -s -m fast
+# connect to default postgres database
+psql postgres
+```
+
+## Create Database `mbon`
+
+### Rename Existing
+
+For now, using existing data loaded into shipwrecks database:
+
+```bash
+psql postgres
+```
+
+```sql
+ALTER DATABASE shipwrecks RENAME TO mbon;
+```
+
+```bash
+\q
+```
+
+### Create New
+
+Or, to create fresh:
+
+```sql
+CREATE DATABASE mbon;
+-- DROP DATABASE mbon;
+\cnnect mbon
+-- Enable PostGIS (includes raster)
+CREATE EXTENSION postgis;
+-- Enable Topology
+CREATE EXTENSION postgis_topology;
+-- Enable PostGIS Advanced 3D
+-- and other geoprocessing algorithms
+-- sfcgal not available with all distributions
+CREATE EXTENSION postgis_sfcgal;
+-- fuzzy matching needed for Tiger
+-- CREATE EXTENSION fuzzystrmatch;
+-- rule based standardizer
+-- CREATE EXTENSION address_standardizer;
+-- example rule data set
+-- CREATE EXTENSION address_standardizer_data_us;
+-- Enable US Tiger Geocoder
+-- CREATE EXTENSION postgis_tiger_geocoder;
+```
+
+Per [edzer/sfr: Simple features for R](https://github.com/edzer/sfr), installed dev version to get `st_write()` compatability with PostGIS vs:
+
+```{r}
+library(sf)
+library(RPostgreSQL)
+
+shapes <- list(
+  wrecks = './data/shipwrecks_pts.shp',
+  wdpa   = './data/WDPA_Dec2016-shapefile/WDPA_Dec2016-shapefile-polygons.shp', # 213,328 features
+  eez    = './data/World_EEZ_v9_20161021/eez.shp',
+  lme    = './data/LME66/LME66.shp',
+  iho    = './data/IHO/World_Seas.shp')
+
+shp <- shapes[[2]]
+obj <- names(shapes[2])
+
+db <- 'mbon'
+con <- dbConnect(dbDriver('PostgreSQL'), dbname=db, host='localhost')
+
+nc = st_read(system.file("shape/nc.shp", package="sf"))
+st_write(nc, "nc.shp")
+st_write(nc, sprintf('PG:dbname=%s', db), 'nc', layer_options = 'OVERWRITE=true')
+```
+
+```
+Error in guess_driver(dsn) :
+  guess_driver: PostgreSQL not available in supported drivers, see `st_drivers()'
+```
+
+uninstalling:
+
+sudo rm -rf /Library/Frameworks/Python.framework/
+
+- [osx - What is the safest way to removing Python framework files that are located in different place than Brew installs - Stack Overflow](http://stackoverflow.com/questions/22774529/what-is-the-safest-way-to-removing-python-framework-files-that-are-located-in-di)
+
+
+So installing:
+
+- [GDAL 2 On Mac with Homebrew](http://www.karambelkar.info/2016/10/gdal-2-on-mac-with-homebrew/)
+
+```bash
+# unlink gdal 1.x
+brew unlink gdal
+brew prune gdal
+
+# remove kyngchaos.com GDAL framework install
+sudo rm -rf /Library/Frameworks/GDAL.framework/
+brew prune
+
+# tap into osgeo4mac
+brew tap osgeo/osgeo4mac && brew tap --repair
+
+# install gdal2
+#brew install gdal2 --with-armadillo \
+#  --with-complete --with-libkml --with-unsupported
+# Error: undefined method `rebuild' for #<BottleSpecification:0x007fa31d8a1bd8>
+brew install gdal2
+
+# link gdal2
+brew link --force gdal2
+
+# verify version in new terminal
+gdal-config --version
+# 2.1.1
+gdal-config --libs
+# -L/usr/local/Cellar/gdal2/2.1.1/lib -lgdal
+gdal-config --cflags
+# -I/usr/local/Cellar/gdal2/2.1.1/include
+```
+
+- reinstall rgdal
+
+```R
+remove.packages('rgdal')
+install.packages('rgdal')
+library(rgdal) # test
+remove.packages('rgeos')
+install.packages('rgeos')
+```
+
+- restart R session
+
+```bash
+brew info gdal2
+```
+
+```R
+library(devtools)
+Sys.setenv(GDAL_CONFIG='/usr/local/opt/gdal2/bin/gdal-config')
+install_github('edzer/sfr')
+```
+
+screw it:
+
+```R
+install.packages("sf")
+```
+
+# load csv of points into db
+
+Using [CSV Driver | GDAL.org](http://www.gdal.org/drv_csv.html):
+
+``
+<OGRVRTDataSource>
+    <OGRVRTLayer name="test">
+        <SrcDataSource>test.csv</SrcDataSource>
+        <GeometryType>wkbPoint</GeometryType>
+        <LayerSRS>WGS84</LayerSRS>
+        <GeometryField encoding="PointFromColumns" x="Longitude" y="Latitude"/>
+    </OGRVRTLayer>
+</OGRVRTDataSource>
+
+`bash
+csocc="/Users/bbest/github/obis-lat-time-fig/data/occurrences"
+csv="$occ.csv"
+vrt="$occ.vrt"
+
+ad $csv
+og
+ogr2ogr --version # GDAL 1.11.3, released 2015/09/16
+
+cd /Users/bbest/github/obis-lat-time-fig/data
+vi occurrences.vrt
+```
+
+```xml
+<OGRVRTDataSource>
+    <OGRVRTLayer name="occurrences">
+        <SrcDataSource relativeToVRT="1">occurrences.csv</SrcDataSource>
+        <GeometryType>wkbPoint</GeometryType>
+        <LayerSRS>WGS84</LayerSRS>
+        <GeometryField encoding="PointFromColumns" x="decimalLongitude" y="decimalLatitude"/>
+    </OGRVRTLayer>
+</OGRVRTDataSource>
+```
+
+
+```bash
+#ogrinfo -ro -al $csv X_POSSIBLE_NAMES=decimalLongitude Y_POSSIBLE_NAMES=decimalLatitude -oo KEEP_GEOM_COLUMNS=NO
+rinfo -ro -al $c$vrt ``
+
+,
+```
+
+```
+
+
+# load shp into db
+
+[shp2pgsql: Using the ESRI Shapefile Loader](http://postgis.net/docs/using_postgis_dbmanagement.html#shp2pgsql_usage)
+
+```bash
+ogrinfo
+cd /Users/bbest/github/mbon
+#shp2pgsql -I -s <SRID> <PATH/TO/SHAPEFILE> <SCHEMA>.<DBTABLE> | psql -U postgres -d <DBNAME>
+# psql mbon; DROP TABLE
+shp2pgsql -i -D -d -s 4269 -I ./data/World_EEZ_v9_20161021/eez.shp eez | psql -d mbon
+shp2pgsql -i -D -d -s 4269 -I ./data/WDPA_Dec2016-shapefile/WDPA_Dec2016-shapefile-polygons.shp wdpa | psql -d shipwrecks
+```
+
+```bash
+brew install qscintilla2
+brew install qgis2
+```
+
+```{r}
+ply = st_read(shp)
+st_layers("PG:dbname=shipwrecks")
+st_read("PG:dbname=shipwrecks")
+eez = st_read_db(con, 'eez')
+plot(eez)
+st_write(ply, sprintf('PG:dbname=%s', db), obj, layer_options = 'OVERWRITE=true')
+```
+
+#select from wrecks, eez where st_intersects(wrecks.geom, eez.geom) and num in (29,30,31);
+
+# test if column is unique
+#select mrgid from eez group by mrgid having count(*) > 1;
+
+
+
+system.time({
+  res = dbGetQuery(
+    con,
+    "SELECT num, geoname FROM wrecks, eez WHERE ST_INTERSECTS(wrecks.geom, eez.geom);")
+})
+#  user  system elapsed
+# 0.018   0.002   7.547
+
+eez    = st_read(shapes[['eez']])
+wrecks = st_read(shapes[['wrecks']])
+
+system.time({
+  res2 = wrecks %>%
+    st_intersects(eez) %>%
+    select(num, geoname)
+})
+
+
+ply = rgdal::readOGR(dirname(shp), tools::file_path_sans_ext(basename(shp)))
+
+wrecks_df
+
+pts_ply = sp::over(wrecks_pts[28:31,], ply)
+pts_ply
+
+```
+
+```{r raster}
+# raster::extract()
+dir_asc = './data/BioOracle'
+
+rasters = stack(list.files(dir_asc, '\\.asc$', full.names=T))
+crs(rasters) = crs_gcs
+
+for (asc in list.files(dir_asc, '\\.asc$', full.names=T)){ # asc = list.files(dir_asc, '\\.asc$', full.names=T)[1]
+
+
+  r = rgdal::readGDAL(asc)
+
+}
+```
+
