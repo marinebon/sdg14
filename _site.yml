@@ -32,6 +32,8 @@ navbar:
 #          href: informatics.html
     - text: "Biodiversity"
       menu:
+        - text: "Sanctuary Infographics"
+          href: info-sanctuaries.html          
         - text: "Global Biodiversity"
           href: info-gl.html
         - text: "CMAR Biodiversity"
