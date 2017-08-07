@@ -50,6 +50,8 @@ navbar:
       menu:
         - text: "Gray's Reef Larval Connectivity"
           href: conn-gr.html
+        - text: "Monterey Bay & Florida Keys Larval Connectivity"
+          href: conn-nms.html
 output_dir: "."
 output:
   html_document:
