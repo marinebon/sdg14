@@ -1,5 +1,9 @@
 ---
-title: "MBON SDG14 Tools"
+title: "MBON SDG14 Apps"
 ---
 
-Hello, Website!
+Welcome to the prototype tools site by the Marine Biodiversity Observation Network (MBON) working supporting Sustainable Development Goal (SDG) 14, Life in the Sea.
+
+Please peruse the applications through the menu above.
+
+This work is supported by NOAA and NASA.
