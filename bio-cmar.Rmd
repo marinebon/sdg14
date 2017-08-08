@@ -1,9 +1,0 @@
----
-title: "CMAR Regional Biodiversity Analysis"
-params:
-  url_app: 'https://marinebon.github.io/sdg14/technical/cmar.html'
----
-
-Direct: [`r params$url_app`](`r params$url_app`)
-
-<iframe frameborder='0' width='100%' height='850' src='`r params$url_app`'></iframe>
