@@ -1,0 +1,179 @@
+---
+title: "iobis/robis2"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r}
+#library(robis) # devtools::install_github('iobis/robis')
+#library(robis2) # devtools::install_github('iobis/robis2')
+```
+
+```{r data.table::fread(obis_all.csv)}
+library(tidyverse)
+library(data.table)
+
+obis_csv    = '/Users/bbest/Downloads/obis_download/obis_occ.csv'
+obis2_csv   = '/Users/bbest/Downloads/obis_download/obis_occ_colsdropped.csv'
+
+# obis10k_csv = '/Users/bbest/Downloads/obis_download/obis_occ_head10k.csv'
+# obis10k = read_csv(obis10k_csv)
+# cols_txt = '~/Downloads/obis_download/cols.txt'
+# writeLines(paste(names(o), collapse="','"), cols_txt)
+# system(sprintf('open %s', cols_txt))
+# obis10k = fread(obis10k_csv, drop=cols_drop)
+# View(obis10k)
+
+# get rid of mostly empty or redundant columns
+cols_drop = c(
+  'acceptedNameUsage','acceptedNameUsageID','accessRights','associatedMedia','associatedReferences','associatedSequences','associatedTaxa',
+  'basisOfRecord','behavior','bibliographicCitation',
+  'collectionID','continent','coordinatePrecision','coordinateUncertaintyInMeters','countryCode','county',
+  'dataGeneralizations','datasetID','dateIdentified','division','dynamicProperties',
+  'establishmentMeans','eventID','eventRemarks','eventTime',
+  'fieldNotes','fieldNumber','footprintSRS','footprintWKT','forma',
+  'geodeticDatum',
+  'habitat','higherClassification','higherGeography','higherGeographyID',
+  'identificationID','identificationQualifier','identificationReferences','identificationRemarks','identifiedBy','individualCount',
+  'individualID','informationWithheld','infraclass','infrakingdom','infraorder','infraphylum','institutionID','island','islandGroup',
+  'language','lifeStage','locality','locationAccordingTo','locationID','locationRemarks',
+  'materialSampleID','maximumDepthInMeters','minimumDepthInMeters','modified','municipality',
+  'nameAccordingTo','nameAccordingToID','namePublishedIn','namePublishedInID',
+  'occurrenceID','occurrenceRemarks','occurrenceStatus','originalNameUsage','originalNameUsageID','otherCatalogNumbers','ownerInstitutionCode',
+  'parvorder',
+  'section',
+  'recordNumber','recordedBy','references','reproductiveCondition','rights','rightsHolder',
+  'scientificNameAuthorship','sex','source',
+  'stateProvince','subclass','subdivision','subfamily','subforma','subgenus','subkingdom','suborder',
+  'subphylum','subsection','subspecies','subterclass','subtribe','subvariety',
+  'superclass','superfamily','superorder','supertribe',
+  'taxonConceptID','taxonID','taxonRank','taxonRemarks','taxonomicStatus',
+  'tribe','type','typeStatus',
+  'variety','vernacularName',
+  'waterBody')
+
+if (!file.exists(obis2_csv)){
+  system.time({
+    obis = fread(obis_csv, drop=cols_drop)
+  })
+  fwrite(obis, obis2_csv)
+}
+# storage.mode(obis)
+# object.size(obis)
+
+system.time({
+  obis = fread(obis2_csv) # 48,381,287 rows; 7.5 minutes
+})
+
+library(sf)
+
+obis_pts = with(obis, st_sfc(st))
+obis_sf = obis %>%
+  mutate(
+    geometry = map2(decimalLongitude, decimalLatitude, function(x, y) st_point(c(x, y))))
+  
+  st_set_geometry()
+
+st_geometry()
+
+# transform lon from [-180,180] to [0,360]
+  # [sf::st_transform not honoring +lon_wrap](https://github.com/edzer/sfr/issues/280)
+  wave_sf = wave_sf %>%
+    mutate(geometry = (geometry + c(360,90)) %% c(360) - c(0,90)) %>% 
+    st_set_crs(crs_gcs_w)
+  
+
+```
+
+```{r eez}
+
+library(mapview)
+
+eez_shp = '/Volumes/Best HD/mbon_data_big/technical/boundaries/eez_derived/eez_s005.shp'
+
+eez = read_sf(eez_shp)
+#eez %>% st_set_geometry(NULL) %>% View
+
+eez = eez %>%
+  mutate(
+    bb      = map(geometry, st_bbox),
+    bb_xmin = map_dbl(bb, function(x) x[['xmin']]),
+    bb_xmax = map_dbl(bb, function(x) x[['xmax']]),
+    bb_xdif = bb_xmax - bb_xmin,
+    bb_wrap = ifelse(bb_xmax - bb_xmin > 359, T, F))
+eez %>% select(Territory1, bb_xmin, bb_xmax, bb_xdif, bb_wrap) %>% st_set_geometry(NULL) %>% View
+
+mapview(eez %>% filter(bb_wrap) %>% select(Territory1, bb_xmin, bb_xmax) , zcol='Territory1')
+mapview(eez %>% filter(Territory1 == 'Spain') %>% select(Territory1, bb_xmin, bb_xmax) , zcol='Territory1')
+mapview(eez %>% select(Territory1, bb_xmin, bb_xmax) , zcol='Territory1')
+
+# transform lon from [-180,180] to [0,360]
+  # [sf::st_transform not honoring +lon_wrap](https://github.com/edzer/sfr/issues/280)
+  wave_sf = wave_sf %>%
+    mutate(geometry = (geometry + c(360,90)) %% c(360) - c(0,90)) %>% 
+    st_set_crs(crs_gcs_w)
+  
+
+# Antarctica
+# -180.0000000
+# -85.562500
+# 2
+# Tuvalu
+# -180.0000000
+# -13.240386
+# 3
+# Wallis and Futuna
+# -180.0000000
+# -15.919306
+# 4
+# Fiji
+# -180.0000000
+# -25.097091
+# 5
+# United States
+# -180.0000000
+# 51.170065
+# 6
+# Hawaii
+# -180.0000000
+# 15.563236
+# 7
+# Russia
+# -180.0000000
+# 39.818125
+# 8
+# Alaska
+# -180.0000000
+# 47.876547
+# 9
+# Gilbert Islands
+# -180.0000000
+# -4.361697
+# 10
+# New Zealand
+# -179.9999885
+# -55.949293
+# 11
+# Howland and Baker islands
+# -179.9519479
+# -3.014831
+
+system.time({
+  obis = fread(obis_csv, drop=cols_drop)
+})
+```
+
+
+```{r qcflags, eval=F}
+qcflags(as.logical(intToBits(1073217151)))
+```
+
+# TODO
+
+- look for telemetry with `basisOfRecord`/`individualID`
+- look at `taxonomicgroup`
