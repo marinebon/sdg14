@@ -1,0 +1,71 @@
+---
+title: "Sea Around Us"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Sea Around Us
+
+```{r saup 1}
+library(seaaroundus) # devtools::install_github('ropensci/seaaroundus')
+
+marinetrophicindex("eez", 76, chart=TRUE)
+```
+
+```{r saup err, eval=F, echo=F}
+library(tidyverse)
+#library(sf)          # devtools::install_github('r-spatial/sf')
+
+eez_csv = 'data/sea-around-us_eez.csv'
+
+if (!file.exists(eez_csv)){
+  eez_tbl = listregions('eez') %>%
+    rownames_to_column(var='id') %>%
+    mutate(
+      trophic_idx = map(id, function(x) try(marinetrophicindex('eez', x))),
+      trophic_err = ifelse(!'list' %in% class(trophic_idx), T, F))
+  # eez_tbl0 = eez_tbl # eez_tbl = eez_tbl0
+  eez_tbl = eez_tbl %>%
+    #select(-marinetrophicindex)
+    mutate(
+      trophic_err = ifelse(!'list' %in% class(trophic_idx), T, F))
+      trophic_err = ifelse('try-error' %in% class(trophic_idx), T, F))
+
+v = eez_tbl %>%
+  filter(id==898) %>%
+  .$trophic_idx
+ifelse('try-error' %in% class(v), T, F)
+
+
+  eez_tbl = eez_tbl %>%
+    filter(!trophic_err) %>%
+    unnest(trophic_idx)
+
+# ERRORS from `marinetrophicindex('eez', id)`:
+# Error : lexical error: invalid char in json text.
+#           1979,null],[1980,null],[1981,Infinity],[1982,4.9240000000000
+#                      (right here) ------^
+# Error in callapi(paste(getapibaseurl(), region, "marine-trophic-index",  : 
+#   Internal Server Error (HTTP 500).
+
+#   View()
+# d = catchdata('eez', 76, limit=1000)
+# dim(d)
+# d %>% View()
+# catchdata("eez", 76, measure="value", dimension="reporting-status")
+# 
+# regionmap("eez")
+# 
+# marinetrophicindex("eez", 76)
+# getcells("POLYGON ((-48.177685950413291 15.842380165289299,-48.177685950413291 15.842380165289299,
+# -54.964876033057919 28.964280991735578,-35.960743801652967 27.606842975206646,-48.177685950413291
+# 15.842380165289299))", check_wkt=T)
+# 
+# getcelldata(2005, c(89568,90288,89569))
+```
+
+
+
