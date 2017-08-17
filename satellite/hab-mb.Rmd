@@ -1,0 +1,80 @@
+---
+title: "Harmful Algal Bloom (HAB) for Monterey Bay"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    toc_float: true
+    number_sections: true
+    code_folding: hide
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Read OPeNDAP metadata
+
+* [Algal Bloom Data | CeNCOOS](http://www.cencoos.org/data/parameters/blooms)
+    * [C-HARM HAB Model (California-Harmful Algal Risk Mapping) | CeNCOOS](http://www.cencoos.org/data/models/habs)
+        * [CeNCOOS Data Portal: C-HARM Experimental HAB Forecasts](http://data.cencoos.org/#module-metadata/fff184a0-d1e0-11e4-9003-00265529168c/17117792-9441-414e-939b-271e511a0664)
+            * [OPeNDAP Dataset Query Form](https://thredds.cencoos.org/thredds/dodsC/HAB_PSEUDO_NITZSCHIA_NOWCAST.nc.html)
+
+Read OPeNDAP URL ending in *.nc.
+
+```{r nc}
+library(ncdf4)
+
+url_nc = 'http://thredds.cencoos.org/thredds/dodsC/HAB_PSEUDO_NITZSCHIA_NOWCAST.nc'
+
+nc = nc_open(url_nc)
+
+nc
+```
+
+
+```{r}
+nc$nvars
+nc$groups
+nc$groups[[1]]$nvars
+nc$groups[[1]]$ndims
+nc$groups[[1]]$varsize
+```
+
+## Plot
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(raster)
+
+lat  = ncvar_get(nc, 'latitude')
+lon  = ncvar_get(nc, 'longitude')
+date = as.Date('0-01-01') + days(ncvar_get(nc, 'time'))
+# range(date)
+
+#r = raster(nc) , varname='pseudo_nitzschia'), lvar=4, level=which.max(date))
+r = raster(url_nc) # r
+plot(r)
+```
+
+```{r}
+r_end = raster(url_nc, level=which.max(date)) # r_end
+plot(r_end)
+```
+
+```{r}
+cellStats(r, 'mean')
+cellStats(r_end, 'mean')
+```
+
+
+## Extract time series for Monterey Bay
+
+- TODO: get polygon of Monterey Bay NMS
+
+```{r}
+# raster::extract()
+```
+
