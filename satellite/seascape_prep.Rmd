@@ -3,6 +3,8 @@ title: "seascapes"
 output: html_document
 ---
 
+## Mat to grd
+
 ```{r mat to grd, eval=F}
 library(tidyverse)
 library(R.matlab)
@@ -96,22 +98,37 @@ unlist(lapply(v, function(x) if (!is.null(x)) mean(x, na.rm=TRUE) else NA ))
 v <- raster::extract(r, polys, cellnumbers=TRUE)
 ```
 
+## Extract EEZ
 
 ```{r extract eez}
-library(sf)
-s = stack(grd)
+library(tidyverse) # http://tidyverse.org
+library(stringr)
+library(lubridate)
+library(raster)   # http://robinlovelace.net/geocompr/spatial-class.html#raster-data
+library(sp)       # vector library (pts, lns, polys) precursor to sf
+library(sf)       # simple features library https://edzer.github.io/UseR2017/ 
+
+dir_mat = '/mbon/data_big/satellite/seascapes/gl'
+grd   = file.path(dir_mat, 'GLOBE14_I90VAR3_9k.grd')
+
+# smaller file
+dir_mat = '/mbon/data_big/satellite/chlor_a/clim_27km'
+grd = file.path(dir_mat, 'A20032007_chlor_a_CLIM_MO_GLOB_27km.grd')
+
+s = stack(grd) # plot(s[[1]])
 s = stack(s, area(s[[1]]))
 names(s)[nlayers(s)] = 'area_km2'
+# plot(s[['area_km2']])
 
-eez_s005_shp    = '/mbon/data_big/technical/boundaries/eez_derived/eez_s005.shp'
+eez_s005_shp = '/mbon/data_big/technical/boundaries/eez_derived/eez_s005.shp'
 eez_sp = read_sf(eez_s005_shp) %>% as('Spatial')
-eez_sp$GeoName[duplicated(eez_sp$GeoName)]
+eez_sp$GeoName #[duplicated(eez_sp$GeoName)]
 plot(eez_sp['GeoName'])
 
 # TODO: zonal area
 system.time({
   s_e = raster::extract(s, eez_sp, na.rm=T, df=T)
-}) # 2.7 hrs
+}) # 2.7 hrs for seascapes/GLOBE14_I90VAR3_9k.grd; 2.3 min for clim_27km/
 
 write_rds(s_e, '/mbon/data_big/satellite/seascapes/gl/gl-seascape-eez-extract.Rdata')
 s_e = read_rds('/mbon/data_big/satellite/seascapes/gl/gl-seascape-eez-extract.Rdata')
