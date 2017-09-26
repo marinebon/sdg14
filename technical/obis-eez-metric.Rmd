@@ -1,0 +1,451 @@
+---
+title: "ROI EBSA"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    toc_float: true
+    number_sections: true
+    code_folding: hide
+    df_print: paged
+---
+
+## Overview
+
+Workflow:
+
+- select region of interest (ROI), eg CMAR EBSA
+- get obis
+- intersect w/ other subregions:
+    - EEZ, MPAs, EBSAs,...
+    - st_join obis id
+- subsequent analytical aspects
+    - TODO: in/out MPA. simple index?
+      - proportion of obs in/out
+      - filter by RedList, eg more in vs out: ratio for spp > LC (least concern)
+          - drill down by # years obs & recent? **advise on future monitoring**
+          - mgt msg: overlay obs grid w/ hi chl 
+    - compare w/ hi chl / upwelling areas / unique seascapes
+    - TODO: show ecosystem/habitats + cumulative impacts
+
+- EEZ
+    - + Disputed Territory
+    - + Joint regime (EEZ)
+- Territorial Sea
+- Marine Protected Area (MPA)
+- IHO Sea Area
+- FAO Subareas
+- Marine Subregion
+- Marine Ecoregion of the World (MEOW)
+
+
+```{r setup, warning=F, message=F}
+knitr::opts_chunk$set(echo=T, message=F, warning=F)
+library(tidyverse)
+library(sf)
+library(geosphere)
+library(mapview)
+library(robis)  # devtools::install_github('iobis/robis')
+library(robis2) # devtools::install_github('iobis/robis2')
+library(rmapshaper)
+library(geojsonio)
+library(scales)
+library(DT)
+library(leaflet)
+library(htmltools)
+library(htmltools)
+
+if (basename(getwd()) != 'technical') setwd('technical')
+
+roi              = 'cmar'
+roi_url          = 'https://chm.cbd.int/api/v2013/documents/FB73B0D1-64FB-367F-405A-51AAA4C060F7/attachments/ETTP_8_EBSA.geojson'
+#roi              = 'clipperton'
+#roi_url          = 'https://chm.cbd.int/api/v2013/documents/494D9489-5D08-524D-84AE-AD6817304655/attachments/ETTP_2_EBSA.geojson'
+roi_geo          = sprintf('cache/%s.geojson', roi)
+occ_csv          = sprintf('cache/%s_occ.csv', roi)
+occ_cklist_csv   = sprintf('cache/%s_occ_checklist.csv', roi)
+occ_txt          = sprintf('cache/%s_occ_nwkt.txt', roi)
+occ_geo          = sprintf('cache/%s_occ.geojson', roi)
+eez_all_rdata    = 'cache/eez_all.rdata'
+eez_smp_rdata    = 'cache/eez_smp.rdata'
+eez_geo          = sprintf('cache/%s_eez.geojson', roi)
+wdpa_geo         = sprintf('cache/%s_wdpa.geojson', roi)
+wdpa_eez_geo     = sprintf('cache/%s_wdpa_eez.geojson', roi)
+occ_eez_wdpa_csv = sprintf('cache/%s_occ_eez_wdpa.csv', roi)
+
+if (!dir.exists('cache')) dir.create('cache')
+```
+
+## Fetch EEZs
+
+Get the exclusive economic zones (EEZs) within the ROI region of interest to get at areas of political interest and management.
+
+Fetch the entire EEZ dataset (takes ~ 2 min by hitting the MarineRegions.org WFS server at VLIZ.be) and subset based on intersecting EEZs.
+
+```{r fetch all EEZs via WFS}
+if (!file.exists(eez_all_rdata)){
+  eez_url = 'http://geo.vliz.be/geoserver/MarineRegions/ows?service=WFS&version=1.0.0&request=GetFeature&typeName=MarineRegions:eez'
+  eez_all = read_sf(eez_url)           # 2.2 min
+
+  # make geometries valid
+  if (!is.na(sf_extSoftVersion()["lwgeom"])) {
+    suppressWarnings(st_is_valid(eez_all))
+    eez_all = st_make_valid(eez_all)
+    st_is_valid(eez_all)
+    eez_all = eez_all %>% st_cast()
+  }  
+  
+  saveRDS(eez_all, file=eez_all_rdata) # store compressed
+}
+eez_all = readRDS(eez_all_rdata)
+
+# show table without geom
+eez_all %>%
+  st_set_geometry(NULL)
+```
+
+## Generalize EEZ for Querying OBIS
+
+In order to query OBIS and other web services, well known text (WKT) is needed which when passed through a URL has a limited number of characters to pass. To reduce this size, buffer by 0.1 decimal degrees and simplify the polygon (by 95%).
+
+```{r generalize roi, message=F}
+if (!file.exists(eez_smp_rdata)){
+
+  eez_smp = eez_all %>%
+    st_buffer(dist=0) %>%
+    geojson_json() %>%
+    ms_simplify() %>%
+    geojson_sp() %>%
+    st_as_sf()
+
+  saveRDS(eez_smp, file=eez_smp_rdata) # store compressed
+}  
+eez_smp = readRDS(eez_smp_rdata)
+
+```
+The WKT representation got reduced from `r nchar(roi0_wkt) %>% comma()` to `r nchar(roi_wkt) %>% comma()` characters.
+
+## Fetch OBIS occurrences
+
+Fetch OBIS records using the newer [iobis/robis2](https://github.com/iobis/robis2) package that retrieves records really fast using ElasticSearch.
+
+```{r fetch obis tbl for roi poly}
+cols_drop = c(
+  'acceptedNameUsage','acceptedNameUsageID','accessRights','associatedMedia','associatedReferences','associatedSequences','associatedTaxa',
+  'basisOfRecord','behavior','bibliographicCitation',
+  'collectionID','continent','coordinatePrecision','coordinateUncertaintyInMeters','countryCode','county',
+  'dataGeneralizations','datasetID','dateIdentified','division','dynamicProperties',
+  'establishmentMeans','eventID','eventRemarks','eventTime',
+  'fieldNotes','fieldNumber','footprintSRS','footprintWKT','forma',
+  'geodeticDatum',
+  'habitat','higherClassification','higherGeography','higherGeographyID',
+  'identificationID','identificationQualifier','identificationReferences','identificationRemarks','identifiedBy','individualCount',
+  'individualID','informationWithheld','infraclass','infrakingdom','infraorder','infraphylum','institutionID','island','islandGroup',
+  'language','lifeStage','locality','locationAccordingTo','locationID','locationRemarks',
+  'materialSampleID','maximumDepthInMeters','minimumDepthInMeters','modified','municipality',
+  'nameAccordingTo','nameAccordingToID','namePublishedIn','namePublishedInID',
+  'occurrenceID','occurrenceRemarks','occurrenceStatus','originalNameUsage','originalNameUsageID','otherCatalogNumbers','ownerInstitutionCode',
+  'parvorder',
+  'section',
+  'recordNumber','recordedBy','references','reproductiveCondition','rights','rightsHolder',
+  'scientificNameAuthorship','sex','source',
+  'stateProvince','subclass','subdivision','subfamily','subforma','subgenus','subkingdom','suborder',
+  'subphylum','subsection','subspecies','subterclass','subtribe','subvariety',
+  'superclass','superfamily','superorder','supertribe',
+  'taxonConceptID','taxonID','taxonRank','taxonRemarks','taxonomicStatus',
+  'tribe','type','typeStatus',
+  'variety','vernacularName',
+  'waterBody',
+  'phylum','class','order','family','genus','species') # covered by checklist
+
+if (any(!file.exists(occ_txt), !file.exists(occ_csv))){
+  occ_tbl = robis2::occurrence(geometry=roi_wkt) %>% 
+    as_tibble()
+  occ_tbl = occ_tbl %>%
+    select_(.dots = setdiff(names(occ_tbl), cols_drop))
+  
+  write_lines(nrow(occ_tbl), occ_txt)
+  write_csv(occ_tbl, occ_csv)
+}
+occ_tbl  = read_csv(occ_csv)
+occ_nwkt = read_lines(occ_txt) %>% as.integer()
+
+occ_tbl %>%
+  head()
+```
+
+Above are the first 6 of `r occ_nwkt %>% comma()` records from the generalized WKT.
+
+## Fetch Taxonomic Information with IUCN Redlist
+
+```{r get obis checklist for roi}
+if (!file.exists(occ_cklist_csv)){
+  occ_cklist = robis::checklist(geometry=roi_wkt) # 1.6 min  
+  
+  # get unique taxonomic name (tname), prioritizing beyond with first non-NA of: valid, worms_id, redlist, status, phylum,...
+  occ_cklist = occ_cklist %>%
+    mutate(
+      invalid = valid_id != id) %>%
+    arrange(tname,invalid,worms_id,redlist,status,phylum,class,order,family,genus,species) %>%
+    group_by(tname) %>%
+    summarize(
+      worms_id     = first(worms_id),
+      checklist_id = first(id),
+      valid_id     = first(parent_id),
+      rank_name    = first(rank_name),
+      tauthor      = first(tauthor),
+      phylum       = first(phylum),
+      class        = first(class),
+      order        = first(order),
+      family       = first(family),
+      genus        = first(genus),
+      species      = first(species),
+      redlist      = first(redlist),
+      status       = first(status),
+      wktpoly_sum_records  = sum(records),
+      wktpoly_sum_datasets = sum(datasets))
+  
+  write_csv(occ_cklist, occ_cklist_csv)
+}
+occ_cklist = read_csv(occ_cklist_csv)
+```
+
+```{r occ_cklist debug, eval=F}
+occ_head = head(occ_tbl)
+View(occ_head)
+table(occ_tbl$taxonomicgroup, useNA='ifany') # 0 NAs
+# occ_tbl$taxonomicgroup YES!
+
+sum(duplicated(occ_cklist$id)) # 0
+sum(duplicated(occ_cklist$worms_id)) # 154
+sum(duplicated(occ_cklist$tname[duplicated(occ_cklist$tname)])) # 0
+
+occ_cklist_worms_dupes = occ_cklist %>% 
+  filter(
+    worms_id %in% occ_cklist$worms_id[duplicated(occ_cklist$worms_id)] |
+    tname %in% occ_cklist$tname[duplicated(occ_cklist$tname)]) %>%
+  arrange(worms_id)
+View(occ_cklist_worms_dupes)
+```
+
+## Convert OBIS occcurrences to points and filter
+
+Next, convert the table having decimalLongitude and decimalLatitude into points and filter out points that were in the generalized WKT but not the original ROI polygon.
+
+```{r convert obis tbl to pts within roi poly, message=F}
+if (!file.exists(occ_geo)){
+  occ_tbl = read_csv(occ_csv)
+
+  # turn obis into sf
+  occ_sf = st_sf(
+    occ_tbl, 
+    geometry = st_sfc(
+      with(
+        occ_tbl, 
+        map2(decimalLongitude, decimalLatitude, function(x, y) st_point(c(x, y)))))) %>%
+    st_set_crs(4326)
+  
+  # rm obis outside original roi: 137,277 -> 64,342
+  occ_sf = occ_sf %>%
+    slice(st_intersects(roi_sf, occ_sf)[[1]])
+
+  # write filtered csv
+  occ_sf %>%
+    st_set_geometry(NULL) %>%
+    write_csv(occ_csv)
+  
+  # write geo with just id to save disk space, for later rejoining with occ_tbl
+  if (sum(duplicated(occ_tbl$id)) > 0) stop('Whoah! Expecting unique id in OBIS occ_tbl.')
+  occ_sf %>% 
+    select(id) %>%
+    write_sf(occ_geo, delete_dsn=T)
+}
+occ_tbl = read_csv(occ_csv)
+occ_sf  = read_sf(occ_geo) %>%
+  left_join(
+    occ_tbl, by='id')
+
+leaflet(occ_sf) %>% 
+  addProviderTiles(providers$Stamen.TonerLite) %>%
+  addPolygons(
+    data = roi_sf) %>%
+  addMarkers(
+    clusterOptions = markerClusterOptions())
+```
+
+Above are the OBIS occurrence points, filtered to the original ROI polygon (`r occ_nwkt %>% comma()` to `r nrow(occ_sf) %>% comma()` records). Click on the marker cluster to zoom and explode into finer clusters and eventually individual points.
+
+
+## Fetch MPAs in ROI
+
+We can use the [Protected Planet](https://www.protectedplanet.net/) [ESRI Web Service Query](http://ec2-54-204-216-109.compute-1.amazonaws.com:6080/arcgis/rest/services/wdpa/wdpa/MapServer/1/query) to construct an [ESRI Query (Operation)](https://resources.arcgis.com/en/help/rest/apiref/query.html) on the bounding box of the ROI region. This could be limited to the [fields](http://ec2-54-204-216-109.compute-1.amazonaws.com:6080/arcgis/rest/services/wdpa/wdpa/MapServer/1) available.
+
+```{r fetch wdpa within roi, message=F}
+q_url = 'http://ec2-54-204-216-109.compute-1.amazonaws.com:6080/arcgis/rest/services/wdpa/wdpa/MapServer/1/query'
+bb = st_bbox(roi_sf)
+
+if (!file.exists(wdpa_geo)){
+  res = httr::GET(q_url, query = list(
+    f            = 'json',
+    geometry     = sprintf('%0.1f,%0.1f,%0.1f,%0.1f', bb[['xmin']], bb[['ymin']], bb[['xmax']], bb[['ymax']]),
+    geometryType = 'esriGeometryEnvelope',
+    inSR         = 4326,
+    outSR        = 4326,
+    outFields    = '*'))
+  
+  wdpa_sf = httr::content(res) %>%
+    read_sf() # wdpa0_sf = wdpa_sf; mapview(wdpa0_sf)
+  
+  if (nrow(wdpa_sf) == 0){
+    warning('no wdpa')
+    write_sf(wdpa_sf, wdpa_geo, delete_dsn=T)
+  } else {
+    
+    # filter by eez's within roi
+    wdpa_sf = wdpa_sf %>%
+      slice(st_intersects(roi_sf, wdpa_sf)[[1]])
+    wdpa_sf = wdpa_sf %>%
+      mutate(
+        area_wdpaall_km2 = st_area(st_geometry(wdpa_sf)))
+    wdpa_sf = wdpa_sf %>%
+      st_intersection(roi_sf %>% select())
+    wdpa_sf = wdpa_sf %>%
+      mutate(
+        area_wdparoi_km2 = st_area(st_geometry(wdpa_sf)))
+  
+    write_sf(wdpa_sf, wdpa_geo, delete_dsn=T)
+  }
+}
+wdpa_sf = read_sf(wdpa_geo)
+
+if (nrow(wdpa_sf) == 0){
+  warning('no wdpa')
+} else {  
+  labels <- with(
+    wdpa_sf,
+    sprintf(
+    "<strong>%s</strong><br/>DESIG_ENG: %s<br/>DESIG_TYPE: %s<br/>IUCN CAT: %s<br/>GIS_M_AREA: %s",
+    NAME, DESIG_ENG, DESIG_TYPE, IUCN_CAT, comma(round(GIS_M_AREA,2)))) %>% lapply(HTML)
+  
+  leaflet(roi_sf) %>%
+    addProviderTiles(providers$Stamen.TonerLite) %>%
+    addPolygons() %>%
+    addPolygons(
+      data = wdpa_sf,
+      weight = 1,
+      color = 'green', fillColor = 'green',
+      label = labels,
+      highlight = highlightOptions(
+        color = 'yellow',
+        weight = 5,
+        bringToFront = T))
+}
+```
+
+## MPAs in EEZs
+
+```{r}
+if (!file.exists(wdpa_eez_geo)){
+  wdpa_eez_sf = wdpa_sf %>%
+    st_intersection(eez_sf)
+  
+  write_sf(wdpa_eez_sf, wdpa_eez_geo, delete_dsn=T)
+}
+wdpa_eez_sf = read_sf(wdpa_eez_geo)
+
+labels = with(
+  wdpa_eez_sf,
+  sprintf(
+  "<strong>%s</strong> in <strong>%s - %s</strong><br/>DESIG_ENG: %s<br/>DESIG_TYPE: %s<br/>IUCN CAT: %s<br/>GIS_M_AREA: %s",
+  NAME, sovereign1, territory1, DESIG_ENG, DESIG_TYPE, IUCN_CAT, comma(round(GIS_M_AREA,2)))) %>% lapply(HTML)
+
+wdpa_eez_sf$sovereign1 = factor(wdpa_eez_sf$sovereign1)
+pal = colorFactor('Spectral', wdpa_eez_sf$sovereign1)
+
+leaflet(roi_sf) %>%
+  addProviderTiles(providers$Stamen.TonerLite) %>%
+  addPolygons(
+    weight = 0.5,
+    opacity = 0.2) %>%
+  addPolygons(
+    data = wdpa_eez_sf,
+    weight = 1,
+    fillColor = ~pal(sovereign1), # color = ~pal(sovereign1), 
+    label = labels,
+    highlight = highlightOptions(
+      color = 'yellow',
+      weight = 5,
+      bringToFront = T))
+```
+
+
+## Spatial Join EEZ & WDPA to OBIS occurrences
+
+Spatially identify the EEZ and WDPA for each OBIS occurrence.
+
+```{r obis by eez & wdpa}
+if (!file.exists(occ_eez_wdpa_csv)){
+  o_sf = occ_sf %>%
+    select(occ_id=id) %>%
+    st_join(
+      eez_sf %>% 
+        select(eez_gml_id=gml_id)) %>%
+    st_join(
+      wdpa_sf %>% 
+        select(wdpa_pid = WDPA_PID)) # 4.9 min
+  
+  o_sf %>%
+    st_set_geometry(NULL) %>%
+    write_csv(occ_eez_wdpa_csv)
+}
+occ_eez_wdpa = read_csv(occ_eez_wdpa_csv)
+
+occ_eez_wdpa %>%
+  head()
+```
+
+## Summarize OBIS by EEZ, WDPA, IUCN
+
+```{r}
+o = occ_tbl %>% 
+  left_join(
+    occ_cklist, 
+    by=c('scientificName'='tname')) %>%
+  left_join(
+    occ_eez_wdpa, 
+    by=c('id'='occ_id')) %>%
+  left_join(
+    eez_sf %>%
+      st_set_geometry(NULL), 
+    by=c('eez_gml_id'='gml_id')) %>%
+  left_join(
+    wdpa_sf %>%
+      mutate(WDPA_PID = as.integer(WDPA_PID)) %>%
+      st_set_geometry(NULL), 
+    by=c('wdpa_pid'='WDPA_PID'))
+
+o %>%
+  group_by(taxonomicgroup) %>%
+  summarize(n = n()) %>%
+  arrange(desc(n)) %>%
+  datatable() %>%
+    formatCurrency('n', currency='', digits=0) 
+
+table(o$status, useNA = 'ifany')
+
+o %>%
+  #filter(status %in% c('NT','VU','EN','CR','EX')) %>% # skipping: <NA>,DD,LC
+  group_by(taxonomicgroup, status) %>%
+  summarize(n = n()) %>%
+  left_join(
+    o %>%
+      group_by(taxonomicgroup) %>%
+      summarize(n_taxonomicgroup = n()),
+    by='taxonomicgroup') %>%
+  arrange(desc(n_taxonomicgroup, n)) %>%  
+  datatable() %>%
+    formatCurrency(c('n','n_taxonomicgroup'), currency='', digits=0)
+```
+
+
+
