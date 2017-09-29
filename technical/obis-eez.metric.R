@@ -27,14 +27,16 @@ if (basename(getwd()) != 'technical') setwd('technical')
 # occ_cklist_csv   = sprintf('cache/%s_occ_checklist.csv', roi)
 # occ_txt          = sprintf('cache/%s_occ_nwkt.txt', roi)
 # occ_geo          = sprintf('cache/%s_occ.geojson', roi)
-eez_all_rdata    = 'cache/eez_all.rdata'
-eez_smp_rdata    = 'cache/eez_smp.rdata'
+dir_root = '/mbon/data_big'
+dir_data = file.path(dir_root, 'biodiversity')
+eez_all_rdata    = file.path(dir_data, 'eez_all.rdata')
+eez_smp_rdata    = file.path(dir_data, 'eez_smp.rdata')
 # eez_geo          = sprintf('cache/%s_eez.geojson', roi)
 # wdpa_geo         = sprintf('cache/%s_wdpa.geojson', roi)
 # wdpa_eez_geo     = sprintf('cache/%s_wdpa_eez.geojson', roi)
 # occ_eez_wdpa_csv = sprintf('cache/%s_occ_eez_wdpa.csv', roi)
 
-if (!dir.exists('cache')) dir.create('cache')
+#if (!dir.exists('cache')) dir.create('cache')
 
 obis_cols_drop = c(
   'acceptedNameUsage','acceptedNameUsageID','accessRights','associatedMedia','associatedReferences','associatedSequences','associatedTaxa',
@@ -104,19 +106,22 @@ eez_smp = readRDS(eez_smp_rdata)
 #   addPolygons()
 
 # fetch-obis-by-eez ----
-for (ter in sort(eez_smp$territory1)){
+#for (ter in sort(eez_smp$territory1)){
+for (ter in c('Galapagos','Colombia','Costa Rica','Ecuador','Panama')){
 
   #ter = 'Galapagos' # sort(eez_smp$territory1)
   cat(sprintf('%s - %s\n', ter, Sys.time()))
   ter_f = str_replace_all(ter, ' ', '_')
 
-  wkt_txt  = sprintf('cache/eez-%s_wkt.txt', ter_f)
-  obis_geo = sprintf('cache/eez-%s_obis.geojson', ter_f)
-  obis_csv = sprintf('cache/eez-%s_obis.csv', ter_f)
+  wkt_txt  = sprintf('%s/eez-%s_wkt.txt', dir_data, ter_f)
+  obis_geo = sprintf('%s/eez-%s_obis.geojson', dir_data, ter_f)
+  obis_csv = sprintf('%s/eez-%s_obis.csv', dir_data, ter_f)
   
-  if (any(!file.exists(wkt_txt))){
+  if (!file.exists(wkt_txt)){
     wkt = eez_smp %>%
-      filter(territory1==ter) %>%
+      filter(
+        pol_type == '200NM',
+        territory1==ter) %>%
       st_buffer(dist=0.1) %>%
       st_geometry() %>%
       st_as_text()
@@ -235,7 +240,7 @@ for (ter in sort(eez_smp$territory1)){
   #   head()
   
   # fetch-wdpa ----
-  wdpa_geo = sprintf('cache/eez-%s_wdpa.geojson', ter_f)
+  wdpa_geo = sprintf('%s/eez-%s_wdpa.geojson', dir_data, ter_f)
   
   eez_sf = eez_all %>%
     filter(territory1==ter)
@@ -307,7 +312,7 @@ for (ter in sort(eez_smp$territory1)){
   }
 
   # join-obis-wdpa ----
-  obis_wdpa_csv = sprintf('cache/eez-%s_obis_wdpa.csv', ter_f)
+  obis_wdpa_csv = sprintf('%s/eez-%s_obis_wdpa.csv', dir_data, ter_f)
   
   if (!file.exists(obis_wdpa_csv)){
     
