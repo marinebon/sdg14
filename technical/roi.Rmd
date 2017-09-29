@@ -39,13 +39,13 @@ Workflow:
 - Marine Ecoregion of the World (MEOW)
 
 
-```{r setup, include=FALSE}
+```{r setup, warning=F, message=F}
 knitr::opts_chunk$set(echo=T, message=F, warning=F)
 library(tidyverse)
 library(sf)
 library(geosphere)
 library(mapview)
-library(robis) # devtools::install_github('iobis/robis')
+library(robis)  # devtools::install_github('iobis/robis')
 library(robis2) # devtools::install_github('iobis/robis2')
 library(rmapshaper)
 library(geojsonio)
@@ -53,13 +53,14 @@ library(scales)
 library(DT)
 library(leaflet)
 library(htmltools)
+library(htmltools)
 
 if (basename(getwd()) != 'technical') setwd('technical')
 
-#roi              = 'cmar'
-#roi_url          = 'https://chm.cbd.int/api/v2013/documents/FB73B0D1-64FB-367F-405A-51AAA4C060F7/attachments/ETTP_8_EBSA.geojson'
-roi              = 'clipperton'
-roi_url          = 'https://chm.cbd.int/api/v2013/documents/494D9489-5D08-524D-84AE-AD6817304655/attachments/ETTP_2_EBSA.geojson'
+roi              = 'cmar'
+roi_url          = 'https://chm.cbd.int/api/v2013/documents/FB73B0D1-64FB-367F-405A-51AAA4C060F7/attachments/ETTP_8_EBSA.geojson'
+#roi              = 'clipperton'
+#roi_url          = 'https://chm.cbd.int/api/v2013/documents/494D9489-5D08-524D-84AE-AD6817304655/attachments/ETTP_2_EBSA.geojson'
 roi_geo          = sprintf('cache/%s.geojson', roi)
 occ_csv          = sprintf('cache/%s_occ.csv', roi)
 occ_cklist_csv   = sprintf('cache/%s_occ_checklist.csv', roi)
@@ -71,8 +72,8 @@ wdpa_geo         = sprintf('cache/%s_wdpa.geojson', roi)
 wdpa_eez_geo     = sprintf('cache/%s_wdpa_eez.geojson', roi)
 occ_eez_wdpa_csv = sprintf('cache/%s_occ_eez_wdpa.csv', roi)
 
-library(mapedit)
-mapedit()
+#library(mapedit)
+#editMap()
 ```
 
 ## Fetch EBSA
@@ -244,7 +245,7 @@ if (!file.exists(occ_geo)){
     write_csv(occ_csv)
   
   # write geo with just id to save disk space, for later rejoining with occ_tbl
-  if (sum(duplicated(o_tbl$id)) > 0) stop('Whoah! Expecting unique id in OBIS occ_tbl.')
+  if (sum(duplicated(occ_tbl$id)) > 0) stop('Whoah! Expecting unique id in OBIS occ_tbl.')
   occ_sf %>% 
     select(id) %>%
     write_sf(occ_geo, delete_dsn=T)
@@ -363,40 +364,50 @@ if (!file.exists(wdpa_geo)){
   wdpa_sf = httr::content(res) %>%
     read_sf() # wdpa0_sf = wdpa_sf; mapview(wdpa0_sf)
   
-  # filter by eez's within roi
-  wdpa_sf = wdpa_sf %>%
-    slice(st_intersects(roi_sf, wdpa_sf)[[1]])
-  wdpa_sf = wdpa_sf %>%
-    mutate(
-      area_wdpaall_km2 = st_area(st_geometry(wdpa_sf)))
-  wdpa_sf = wdpa_sf %>%
-    st_intersection(roi_sf %>% select())
-  wdpa_sf = wdpa_sf %>%
-    mutate(
-      area_wdparoi_km2 = st_area(st_geometry(wdpa_sf)))
-
-  write_sf(wdpa_sf, wdpa_geo, delete_dsn=T)
+  if (nrow(wdpa_sf) == 0){
+    warning('no wdpa')
+    write_sf(wdpa_sf, wdpa_geo, delete_dsn=T)
+  } else {
+    
+    # filter by eez's within roi
+    wdpa_sf = wdpa_sf %>%
+      slice(st_intersects(roi_sf, wdpa_sf)[[1]])
+    wdpa_sf = wdpa_sf %>%
+      mutate(
+        area_wdpaall_km2 = st_area(st_geometry(wdpa_sf)))
+    wdpa_sf = wdpa_sf %>%
+      st_intersection(roi_sf %>% select())
+    wdpa_sf = wdpa_sf %>%
+      mutate(
+        area_wdparoi_km2 = st_area(st_geometry(wdpa_sf)))
+  
+    write_sf(wdpa_sf, wdpa_geo, delete_dsn=T)
+  }
 }
 wdpa_sf = read_sf(wdpa_geo)
-  
-labels <- with(
-  wdpa_sf,
-  sprintf(
-  "<strong>%s</strong><br/>DESIG_ENG: %s<br/>DESIG_TYPE: %s<br/>IUCN CAT: %s<br/>GIS_M_AREA: %s",
-  NAME, DESIG_ENG, DESIG_TYPE, IUCN_CAT, comma(round(GIS_M_AREA,2)))) %>% lapply(HTML)
 
-leaflet(roi_sf) %>%
-  addProviderTiles(providers$Stamen.TonerLite) %>%
-  addPolygons() %>%
-  addPolygons(
-    data = wdpa_sf,
-    weight = 1,
-    color = 'green', fillColor = 'green',
-    label = labels,
-    highlight = highlightOptions(
-      color = 'yellow',
-      weight = 5,
-      bringToFront = T))
+if (nrow(wdpa_sf) == 0){
+  warning('no wdpa')
+} else {  
+  labels <- with(
+    wdpa_sf,
+    sprintf(
+    "<strong>%s</strong><br/>DESIG_ENG: %s<br/>DESIG_TYPE: %s<br/>IUCN CAT: %s<br/>GIS_M_AREA: %s",
+    NAME, DESIG_ENG, DESIG_TYPE, IUCN_CAT, comma(round(GIS_M_AREA,2)))) %>% lapply(HTML)
+  
+  leaflet(roi_sf) %>%
+    addProviderTiles(providers$Stamen.TonerLite) %>%
+    addPolygons() %>%
+    addPolygons(
+      data = wdpa_sf,
+      weight = 1,
+      color = 'green', fillColor = 'green',
+      label = labels,
+      highlight = highlightOptions(
+        color = 'yellow',
+        weight = 5,
+        bringToFront = T))
+}
 ```
 
 ## MPAs in EEZs
