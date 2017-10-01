@@ -29,6 +29,7 @@ eez_smp_rdata    = file.path(dir_data, 'eez_smp.rdata')
 wdpa_dir = file.path(dir_root, 'wdpa')
 wdpa_zip = file.path(wdpa_dir, 'WDPA_Sep2017-shapefile.zip')
 wdpa_shp = file.path(wdpa_dir, 'WDPA_Sep2017-shapefile-polygons.shp')
+wdpa_rds = file.path(wdpa_dir, 'WDPA_Sep2017-shapefile-polygons.rds')
 wdpa_url = 'https://www.protectedplanet.net/downloads/WDPA_Sep2017?type=shapefile'
 
 obis_cols_drop = c(
@@ -107,6 +108,27 @@ if (!file.exists(wdpa_shp)){
   unzip(wdpa_zip, exdir=wdpa_dir)
 }
 wdpa_all = read_sf(wdpa_shp) # WHOAH! 3.5 GB shp
+
+system.time({
+  #wdpa_n_invalid = sum(!st_is_valid(wdpa_all))
+  #cat(sprintf('wdpa_n_invalid before: %d\n', wdpa_n_invalid))
+  #if (wdpa_n_invalid > 0){
+    if (!is.na(sf_extSoftVersion()["lwgeom"])) {
+      wdpa_all = wdpa_all %>%
+        st_make_valid() %>% 
+        st_cast()
+    } else {
+      wdpa_all = wdpa_all %>%
+        st_buffer(dist=0) %>%
+        st_cast()
+    }
+    #wdpa_n_invalid = sum(!st_is_valid(wdpa_all))
+    #cat(sprintf('wdpa_n_invalid after: %d\n', wdpa_n_invalid))
+  #}
+})
+wdpa_rds = file.path(wdpa_dir, 'WDPA_Sep2017-shapefile-polygons.rds')
+saveRDS(wdpa_all, wdpa_rds)
+wdpa_all = readRDS(wdpa_rds)
 
 # fetch-obis-by-eez ----
 territories = eez_smp %>% filter(pol_type == '200NM') %>% .$territory1
@@ -265,6 +287,9 @@ for (ter in c('Galapagos','Colombia','Costa Rica','Ecuador','Panama')){
       territory1==ter)
   
   if (!file.exists(wdpa_geo)){
+    
+    st_is_valid(eez_sf)
+    inx = st_intersects(eez_sf, wdpa_all)
     
     # filter by eez's within eez
     wdpa_sf = wdpa_all %>%
