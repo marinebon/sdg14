@@ -99,14 +99,16 @@ if (!file.exists(eez_smp_rdata)){
 }  
 eez_smp = readRDS(eez_smp_rdata)
 
+#mapview(eez_smp)
 # leaflet(eez_smp) %>%
 #   addTiles() %>%
 #   addPolygons()
 
 # fetch-obis-by-eez ----
-for (ter in sort(eez_smp$territory1)){
+territories = eez_smp %>% filter(pol_type == '200NM') %>% .$territory1
+for (ter in territories){
 
-  #ter = 'Galapagos' # sort(eez_smp$territory1)
+  #ter = 'Galapagos' # ter = 'Colombia' # sort(eez_smp$territory1)
   cat(sprintf('%s - %s\n', ter, Sys.time()))
   ter_f = str_replace_all(ter, ' ', '_')
 
@@ -114,10 +116,13 @@ for (ter in sort(eez_smp$territory1)){
   obis_geo = sprintf('cache/eez-%s_obis.geojson', ter_f)
   obis_csv = sprintf('cache/eez-%s_obis.csv', ter_f)
   
-  if (any(!file.exists(wkt_txt))){
+  if (!file.exists(wkt_txt)){
     wkt = eez_smp %>%
-      filter(territory1==ter) %>%
+      filter(
+        pol_type == '200NM',
+        territory1==ter) %>%
       st_buffer(dist=0.1) %>%
+      st_convex_hull() %>%
       st_geometry() %>%
       st_as_text()
     
@@ -131,6 +136,9 @@ for (ter in sort(eez_smp$territory1)){
         st_geometry() %>%
         st_as_text()
     }
+    
+    #old: "MULTIPOLYGON(((-81.54267595 12.0980556, -79.44154756 13.87745643, -73.45708733 15.13332554, -71.1315372 12.75828467, -75.39491029 10.51404426, -77.90466345 12.26324209, -81.54267595 12.0980556)), ((-78.6685557 1.42839193, -83.7965417 1.3566667, -84.3166667 5.1, -79.9217019 5.1, -77.93470224 7.31114837, -77.0248035 3.68909216, -78.6685557 1.42839193)))"
+    # new w/ st_convex_hull(): POLYGON((-78.76095865 1.29069778, -83.79787516 1.35667559, -84.90682908 3.04724628, -84.41252901 5.02846783, -82.08530671 12.86513453, -79.24309222 15.06604623, -71.30800075 14.98762145, -70.67508796 11.64431718, -77.70543696 2.48822948, -78.76095865 1.29069778))
     
     write_lines(wkt, wkt_txt)
   }
@@ -196,8 +204,10 @@ for (ter in sort(eez_smp$territory1)){
         crs=4326, agr='constant')
     
     # rm points outside original unsimplified, unbuffered eez
-    eez = eez_all %>%
-      filter(territory1==ter)
+    eez = eez_all  %>%
+      filter(
+        pol_type == '200NM',
+        territory1==ter)
     obis_sf = obis_sf %>%
       slice(
         st_intersects(
@@ -238,7 +248,9 @@ for (ter in sort(eez_smp$territory1)){
   wdpa_geo = sprintf('cache/eez-%s_wdpa.geojson', ter_f)
   
   eez_sf = eez_all %>%
-    filter(territory1==ter)
+    filter(
+      pol_type == '200NM',
+      territory1==ter)
   
   if (!file.exists(wdpa_geo)){
     bb = st_bbox(eez_sf)
