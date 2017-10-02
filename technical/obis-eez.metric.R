@@ -190,6 +190,7 @@ for (i in seq_along(territories)){
   bb = readWKT(wkt) %>% st_as_sf() %>%
     st_bbox()
   if (bb['xmax'] > 180 | bb['xmin'] < -180){
+    warning("  bb['xmax'] > 180 | bb['xmin'] < -180")
     next()
   }
   
