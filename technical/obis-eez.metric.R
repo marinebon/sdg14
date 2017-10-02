@@ -77,8 +77,10 @@ if (!file.exists(eez_all_rdata)){
   
   saveRDS(eez_all, file=eez_all_rdata) # store compressed
 }
-eez_all = readRDS(eez_all_rdata) %>%
-  st_set_crs(4326)
+if (!exists('eez_all')){
+  eez_all = readRDS(eez_all_rdata) %>%
+    st_set_crs(4326)
+}
 
 # show table without geom
 # eez_all %>%
@@ -94,8 +96,10 @@ if (!file.exists(eez_smp_rdata)){
     st_as_sf()
   
   saveRDS(eez_smp, file=eez_smp_rdata) # store compressed
-}  
-eez_smp = readRDS(eez_smp_rdata)
+} 
+if (!exists('eez_smp')){
+  eez_smp = readRDS(eez_smp_rdata)  
+}
 
 #mapview(eez_smp)
 # leaflet(eez_smp) %>%
@@ -103,41 +107,48 @@ eez_smp = readRDS(eez_smp_rdata)
 #   addPolygons()
 
 # fetch-wdpa
-if (!file.exists(wdpa_shp)){
+if (!file.exists(wdpa_rds)){
   download.file(wdpa_url, wdpa_zip)
   unzip(wdpa_zip, exdir=wdpa_dir)
-}
-wdpa_all = read_sf(wdpa_shp) # WHOAH! 3.5 GB shp
 
-system.time({
-  #wdpa_n_invalid = sum(!st_is_valid(wdpa_all))
-  #cat(sprintf('wdpa_n_invalid before: %d\n', wdpa_n_invalid))
-  #if (wdpa_n_invalid > 0){
-    if (!is.na(sf_extSoftVersion()["lwgeom"])) {
-      wdpa_all = wdpa_all %>%
-        st_make_valid() %>% 
-        st_cast()
-    } else {
-      wdpa_all = wdpa_all %>%
-        st_buffer(dist=0) %>%
-        st_cast()
-    }
+  wdpa_all = read_sf(wdpa_shp) # WHOAH! 3.5 GB shp
+
+  system.time({
+    # [Tidying feature geometries with sf](http://r-spatial.org/r/2017/03/19/invalid.html#tidying-feature-geometries)
     #wdpa_n_invalid = sum(!st_is_valid(wdpa_all))
-    #cat(sprintf('wdpa_n_invalid after: %d\n', wdpa_n_invalid))
-  #}
-})
-wdpa_rds = file.path(wdpa_dir, 'WDPA_Sep2017-shapefile-polygons.rds')
-saveRDS(wdpa_all, wdpa_rds)
-wdpa_all = readRDS(wdpa_rds)
+    #cat(sprintf('wdpa_n_invalid before: %d\n', wdpa_n_invalid))
+    #if (wdpa_n_invalid > 0){
+      if (!is.na(sf_extSoftVersion()["lwgeom"])) {
+        wdpa_all = wdpa_all %>%
+          st_make_valid() %>% 
+          st_cast()
+      } else {
+        wdpa_all = wdpa_all %>%
+          st_buffer(dist=0) %>%
+          st_cast()
+      }
+      #wdpa_n_invalid = sum(!st_is_valid(wdpa_all))
+      #cat(sprintf('wdpa_n_invalid after: %d\n', wdpa_n_invalid))
+    #}
+  })
+  wdpa_rds = file.path(wdpa_dir, 'WDPA_Sep2017-shapefile-polygons.rds')
+  saveRDS(wdpa_all, wdpa_rds)
+}
+if (!exists('wdpa_all')){
+  wdpa_all = readRDS(wdpa_rds)
+}
 
 # fetch-obis-by-eez ----
-territories = eez_smp %>% filter(pol_type == '200NM') %>% .$territory1
-#for (ter in territories){
-for (ter in c('Galapagos','Colombia','Costa Rica','Ecuador','Panama')){
+territories = eez_smp %>% filter(pol_type == '200NM') %>% .$territory1 %>% sort()
+for (i in seq_along(territories)){
+#for (ter in c('Galapagos','Colombia','Costa Rica','Ecuador','Panama')){
   
   #ter = 'Galapagos' # ter = 'Colombia' # sort(eez_smp$territory1)
-  cat(sprintf('%s - %s\n', ter, Sys.time()))
+  ter   = territories[i]
   ter_f = str_replace_all(ter, ' ', '_')
+  
+  cat(sprintf('%d of %d: %s - %s\n', i, length(territories), ter, Sys.time()))
+  
   
   wkt_txt  = sprintf('%s/eez-%s_wkt.txt', dir_data, ter_f)
   obis_geo = sprintf('%s/eez-%s_obis.geojson', dir_data, ter_f)
@@ -177,11 +188,17 @@ for (ter in c('Galapagos','Colombia','Costa Rica','Ecuador','Panama')){
   if (any(!file.exists(obis_geo), !file.exists(obis_csv))){
     # fetch OBIS occurrences
     obis_tbl = robis2::occurrence(geometry=wkt) %>%
-      as_tibble() %>%
+      as_tibble()
+    for (fld in c('year','eventDate','depth','taxonRank')){
+      obis_tbl[fld] = NA
+    }
+    obis_tbl = obis_tbl %>%
       select(
-        id, kingdom, taxonomicgroup, scientificName, year,
-        eventDate, decimalLongitude, decimalLatitude, depth,
-        taxonRank, worms_id, valid_id, originalscientificname,
+        id, kingdom, taxonomicgroup, scientificName, 
+        year, eventDate, depth,
+        decimalLongitude, decimalLatitude,
+        taxonRank, 
+        worms_id, valid_id, originalscientificname,
         resource_id, catalogNumber, institutionCode, collectionCode,
         qc) %>%
       arrange(kingdom, taxonomicgroup, scientificName, year, id) %>%
@@ -198,6 +215,9 @@ for (ter in c('Galapagos','Colombia','Costa Rica','Ecuador','Panama')){
     cklist = robis::checklist(geometry=wkt) # cklist_0 = cklist # View(cklist_0)
     # get unique taxonomic name (tname), prioritizing with first non-NA of:
     #  valid, worms_id, redlist, status, phylum,...
+    for (fld in c('redlist','status')){
+      cklist[fld] = NA
+    }
     cklist = cklist %>%
       rename(
         scientificName = tname) %>%
@@ -259,6 +279,9 @@ for (ter in c('Galapagos','Colombia','Costa Rica','Ecuador','Panama')){
       write_csv(obis_csv)
   }
   
+  # wdpa later
+  next()
+  
   # read OBIS occurrences and join attributes
   obis_sf = read_sf(obis_geo) %>%
     left_join(
@@ -288,9 +311,6 @@ for (ter in c('Galapagos','Colombia','Costa Rica','Ecuador','Panama')){
   
   if (!file.exists(wdpa_geo)){
     
-    st_is_valid(eez_sf)
-    inx = st_intersects(eez_sf, wdpa_all)
-    
     # filter by eez's within eez
     wdpa_sf = wdpa_all %>%
       slice(st_intersects(eez_sf, wdpa_all)[[1]])
@@ -306,8 +326,12 @@ for (ter in c('Galapagos','Colombia','Costa Rica','Ecuador','Panama')){
           area_wdpa_orig_km2 = st_area(st_geometry(wdpa_sf)))
       
       # extract intersection with eez
-      wdpa_sf = wdpa_sf %>%
-        st_intersection(eez_sf %>% select())
+      wdpa_sf = wdpa_sf %>% 
+        st_intersection(eez_sf %>% select(territory1))
+      # TODO: Error in CPL_geos_op2(op, st_geometry(x), st_geometry(y)) : 
+      #   attr classes has wrong size: please file an issue
+      # st_geometry(wdpa_sf): GEOMETRY
+      # st_geometry(eez_sf):  MULTIPOLYGON
       
       # calculate area after extracting to eez
       wdpa_sf = wdpa_sf %>%
@@ -319,28 +343,28 @@ for (ter in c('Galapagos','Colombia','Costa Rica','Ecuador','Panama')){
   }
   wdpa_sf = read_sf(wdpa_geo)
   
-  if (nrow(wdpa_sf) == 0){
-    warning('no wdpa')
-  } else {  
-    labels <- with(
-      wdpa_sf,
-      sprintf(
-        "<strong>%s</strong><br/>DESIG_ENG: %s<br/>DESIG_TYPE: %s<br/>IUCN CAT: %s<br/>GIS_M_AREA: %s",
-        NAME, DESIG_ENG, DESIG_TYPE, IUCN_CAT, comma(round(GIS_M_AREA,2)))) %>% lapply(HTML)
-    
-    leaflet(eez_sf) %>%
-      addProviderTiles(providers$Stamen.TonerLite) %>%
-      addPolygons() %>%
-      addPolygons(
-        data = wdpa_sf,
-        weight = 1,
-        color = 'green', fillColor = 'green',
-        label = labels,
-        highlight = highlightOptions(
-          color = 'yellow',
-          weight = 5,
-          bringToFront = T))
-  }
+  # if (nrow(wdpa_sf) == 0){
+  #   warning('no wdpa')
+  # } else {  
+  #   labels <- with(
+  #     wdpa_sf,
+  #     sprintf(
+  #       "<strong>%s</strong><br/>DESIG_ENG: %s<br/>DESIG_TYPE: %s<br/>IUCN CAT: %s<br/>GIS_M_AREA: %s",
+  #       NAME, DESIG_ENG, DESIG_TYPE, IUCN_CAT, comma(round(GIS_M_AREA,2)))) %>% lapply(HTML)
+  #   
+  #   leaflet(eez_sf) %>%
+  #     addProviderTiles(providers$Stamen.TonerLite) %>%
+  #     addPolygons() %>%
+  #     addPolygons(
+  #       data = wdpa_sf,
+  #       weight = 1,
+  #       color = 'green', fillColor = 'green',
+  #       label = labels,
+  #       highlight = highlightOptions(
+  #         color = 'yellow',
+  #         weight = 5,
+  #         bringToFront = T))
+  # }
   
   # join-obis-wdpa ----
   if (!file.exists(obis_wdpa_csv)){
