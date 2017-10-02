@@ -135,7 +135,7 @@ if (!file.exists(wdpa_rds)){
   saveRDS(wdpa_all, wdpa_rds)
 }
 if (!exists('wdpa_all')){
-  wdpa_all = readRDS(wdpa_rds)
+  #wdpa_all = readRDS(wdpa_rds)
 }
 
 # fetch-obis-by-eez ----
@@ -148,7 +148,6 @@ for (i in seq_along(territories)){
   ter_f = str_replace_all(ter, ' ', '_')
   
   cat(sprintf('%d of %d: %s - %s\n', i, length(territories), ter, Sys.time()))
-  
   
   wkt_txt  = sprintf('%s/eez-%s_wkt.txt', dir_data, ter_f)
   obis_geo = sprintf('%s/eez-%s_obis.geojson', dir_data, ter_f)
@@ -184,6 +183,15 @@ for (i in seq_along(territories)){
     write_lines(wkt, wkt_txt)
   }
   wkt = readLines(wkt_txt)
+  
+  # 1 of 230: Alaska - 2017-10-02 17:06:50
+  # Error in robis2::occurrence(geometry = wkt) : 
+  #   Internal Server Error (HTTP 500).
+  bb = readWKT(wkt) %>% st_as_sf() %>%
+    st_bbox()
+  if (bb['xmax'] > 180 | bb['xmin'] < -180){
+    next()
+  }
   
   if (any(!file.exists(obis_geo), !file.exists(obis_csv))){
     # fetch OBIS occurrences
