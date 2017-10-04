@@ -197,9 +197,17 @@ for (i in seq_along(territories)){
     # fetch OBIS occurrences
     obis_tbl = robis2::occurrence(geometry=wkt) %>%
       as_tibble()
+    
+    if (nrow(obis_tbl)==0){
+      cat('   0 records\n')
+      file.create(obis_csv) # touch file to indicate OBIS searched
+      next()
+    }
+    
     for (fld in c('year','eventDate','depth','taxonRank')){
       obis_tbl[fld] = NA
     }
+    
     obis_tbl = obis_tbl %>%
       select(
         id, kingdom, taxonomicgroup, scientificName, 
