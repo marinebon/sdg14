@@ -147,7 +147,7 @@ for (i in seq_along(territories)){
   ter   = territories[i]
   ter_f = str_replace_all(ter, ' ', '_')
   
-  cat(sprintf('%d of %d: %s - %s\n', i, length(territories), ter, Sys.time()))
+  cat(sprintf('%03d of %d: %s - %s\n', i, length(territories), ter, Sys.time()))
   
   wkt_txt  = sprintf('%s/eez-%s_wkt.txt', dir_data, ter_f)
   obis_geo = sprintf('%s/eez-%s_obis.geojson', dir_data, ter_f)
@@ -190,7 +190,7 @@ for (i in seq_along(territories)){
   bb = readWKT(wkt) %>% st_as_sf() %>%
     st_bbox()
   if (bb['xmax'] > 180 | bb['xmin'] < -180){
-    warning("  bb['xmax'] > 180 | bb['xmin'] < -180")
+    cat("  bb['xmax'] > 180 | bb['xmin'] < -180")
     next()
   }
   
@@ -275,7 +275,7 @@ for (i in seq_along(territories)){
     # rm points outside original unsimplified, unbuffered eez
     eez = eez_all  %>%
       filter(
-        pol_type == '200NM',
+        pol_type == '200NM', # TODO: get disputed & joint areas too
         territory1==ter)
     obis_sf = obis_sf %>%
       slice(
