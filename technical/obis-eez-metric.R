@@ -150,7 +150,7 @@ for (ter in c('Galapagos','Colombia','Costa Rica','Ecuador','Panama')){ # ter = 
   ter   = territories[i]
   ter_f = str_replace_all(ter, ' ', '_')
   
-  cat(sprintf('%d of %d: %s - %s\n', i, length(territories), ter, Sys.time()))
+  cat(sprintf('%03d of %d: %s - %s\n', i, length(territories), ter, Sys.time()))
   
   wkt_txt       = sprintf('%s/eez-%s_wkt.txt', dir_data, ter_f)
   obis_geo      = sprintf('%s/eez-%s_obis.geojson', dir_data, ter_f)
@@ -212,11 +212,19 @@ for (ter in c('Galapagos','Colombia','Costa Rica','Ecuador','Panama')){ # ter = 
     # fetch OBIS occurrences
     obis_tbl = robis2::occurrence(geometry=wkt) %>%
       as_tibble()
+    
+    if (nrow(obis_tbl)==0){
+      cat('   0 records\n')
+      file.create(obis_csv) # touch file to indicate OBIS searched
+      next()
+    }
+    
     for (fld in c('year','eventDate','depth','taxonRank')){
       if (!fld %in% names(obis_tbl)){
         obis_tbl[fld] = NA
       }
     }
+    
     obis_tbl = obis_tbl %>%
       select(
         id, kingdom, taxonomicgroup, scientificName, 
