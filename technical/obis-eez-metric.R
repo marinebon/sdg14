@@ -400,17 +400,28 @@ for (i in 2:length(territories)){
   # join-obis-wdpa ----
   if (!file.exists(obis_wdpa_csv)){
     
-    # join fields with prefix identifying source
-    o_sf = obis_sf %>%
-      select(occurrence_id) %>%
-      st_join(
-        wdpa_sf %>%
-          select(WDPA_PID),
-        left=F)
-    # NOTE: multiple MPAs can occur at a single OBIS occurrence point
-
-    o_sf %>%
-      st_set_geometry(NULL) %>%
+    if (nrow(wdpa_sf) == 0){
+      
+      # populate empty table with same fields
+      o_tbl = tibble(
+        occurrence_id = character(0),
+        WDPA_PID      = character(0))
+      
+    } else {
+    
+      # join fields with prefix identifying source
+      o_tbl = obis_sf %>%
+        select(occurrence_id) %>%
+        st_join(
+          wdpa_sf %>%
+            select(WDPA_PID),
+          left=F) %>%
+        st_set_geometry(NULL)
+      # NOTE: multiple MPAs can occur at a single OBIS occurrence point
+      
+    }
+    
+    o_tbl %>%
       write_csv(obis_wdpa_csv)
   }
   obis_wdpa = read_csv(obis_wdpa_csv)
