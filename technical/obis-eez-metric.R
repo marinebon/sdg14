@@ -513,3 +513,30 @@ for (i in 2:length(territories)){
     write_csv(tbl_metrics, metrics_csv)
   }
 }
+
+# aggregate data for shiny app ----
+
+# metrics
+d_metrics = list.files(dir_data, '^eez-.*_metrics\\.csv$', full.names=T) %>%
+  lapply(read_csv) %>%
+  bind_rows()
+write_csv(d_metrics, file.path(dir_data, '_eez_obis_metrics.csv'))
+
+# obis
+d_taxa = list.files(dir_data, '^eez-.*_obis\\.csv$', full.names=T) %>%
+  map(
+    ~ read_csv(.x) %>% 
+      mutate(
+        Territory1 = str_replace(.x, '.*/eez-(.*)_obis.csv', '\\1'))) %>%
+  bind_rows() %>%
+  group_by(Territory1, taxonomicgroup, kingdom, phylum, class, order, family, genus, species) %>%
+  summarize(
+    n_obs = n(),
+    n_spp = length(unique(scientificName))) %>%
+  # TODO: calculate idx_obis_wdpa per group!
+  left_join(
+    d_metrics %>%
+      select(eez_territory1, idx_obis_wdpa),
+    by = c('Territory1'='eez_territory1'))
+write_csv(d_taxa, file.path(dir_data, '_eez_obis_taxa.csv'))
+
