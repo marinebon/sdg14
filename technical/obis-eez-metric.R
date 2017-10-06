@@ -133,6 +133,9 @@ if (!file.exists(wdpa_gpkg)){
 }
 if (!exists('wdpa_all')){
   wdpa_all = read_sf(dsn=wdpa_gpkg, 'WDPA_poly_Oct2017') # 8.6 min
+  if ('WDPA_PI' %in% names(wdpa_all)){
+    wdpa_all = rename(wdpa_all, WDPA_PID = WDPA_PI)
+  }
 }
 
 # world bbox
@@ -142,9 +145,10 @@ world_sf = readWKT(world_wkt) %>% st_as_sf() %>% st_set_crs(4326)
 # fetch-obis-by-eez ----
 territories = eez_smp %>% filter(pol_type == '200NM') %>% .$territory1 %>% sort()
 #for (i in seq_along(territories)){
-for (ter in c('Galapagos','Colombia','Costa Rica','Ecuador','Panama')){ # ter = 'Colombia'; 
+for (i in 2:length(territories)){
+#for (ter in c('Galapagos','Colombia','Costa Rica','Ecuador','Panama')){ # ter = 'Colombia'; 
 #for (ter in c('Costa Rica','Ecuador','Panama')){ # ter = 'Colombia'; # ter = 'Alaska'
-  i = which(territories==ter)
+#   i = which(territories==ter)
   
   #ter = 'Galapagos' # ter = 'Colombia'; 
   ter   = territories[i]
@@ -358,6 +362,11 @@ for (ter in c('Galapagos','Colombia','Costa Rica','Ecuador','Panama')){ # ter = 
       wdpa_sf = wdpa_sf %>%
         mutate(
           area_wdpa_eez_km2 = st_area(st_geometry(wdpa_sf)))
+      
+      # rename
+      if ('WDPA_PI' %in% names(wdpa_sf)){
+        wdpa_sf = rename(wdpa_sf, WDPA_PID = WDPA_PI)
+      }
       
       write_sf(wdpa_sf, wdpa_geo, delete_dsn=T)
     }
