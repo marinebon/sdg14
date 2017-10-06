@@ -27,10 +27,11 @@ dir_data = file.path(dir_root, 'biodiversity')
 eez_all_rdata    = file.path(dir_data, 'eez_all.rdata')
 eez_smp_rdata    = file.path(dir_data, 'eez_smp.rdata')
 wdpa_dir = file.path(dir_root, 'wdpa')
-wdpa_zip = file.path(wdpa_dir, 'WDPA_Sep2017-shapefile.zip')
-wdpa_shp = file.path(wdpa_dir, 'WDPA_Sep2017-shapefile-polygons.shp')
-wdpa_rds = file.path(wdpa_dir, 'WDPA_Sep2017-shapefile-polygons.rds')
-wdpa_url = 'https://www.protectedplanet.net/downloads/WDPA_Sep2017?type=shapefile'
+wdpa_url  = 'http://wcmc.io/wdpa_current_release'
+wdpa_zip  = file.path(wdpa_dir, 'WDPA_Oct2017_Public.zip') # dir_tmp = '~/Data/mbon_data_big/wdpa' %>% normalizePath()
+wdpa_gdb  = file.path(wdpa_dir, 'WDPA_Oct2017_Public.gdb')
+wdpa_shp  = file.path(wdpa_dir, 'WDPA_poly_Oct2017.shp')
+wdpa_gpkg = file.path(wdpa_dir, 'WDPA_Oct2017_Public.gpkg')
 
 obis_cols_drop = c(
   # ID fields:
@@ -106,63 +107,89 @@ if (!exists('eez_smp')){
 #   addTiles() %>%
 #   addPolygons()
 
-# fetch-wdpa
-if (!file.exists(wdpa_rds)){
+# fetch-wdpa ----
+if (!file.exists(wdpa_gpkg)){
   download.file(wdpa_url, wdpa_zip)
   unzip(wdpa_zip, exdir=wdpa_dir)
-
-  wdpa_all = read_sf(wdpa_shp) # WHOAH! 3.5 GB shp
-
-  system.time({
-    # [Tidying feature geometries with sf](http://r-spatial.org/r/2017/03/19/invalid.html#tidying-feature-geometries)
-    #wdpa_n_invalid = sum(!st_is_valid(wdpa_all))
-    #cat(sprintf('wdpa_n_invalid before: %d\n', wdpa_n_invalid))
-    #if (wdpa_n_invalid > 0){
-      if (!is.na(sf_extSoftVersion()["lwgeom"])) {
-        wdpa_all = wdpa_all %>%
-          st_make_valid() %>% 
-          st_cast()
-      } else {
-        wdpa_all = wdpa_all %>%
-          st_buffer(dist=0) %>%
-          st_cast()
-      }
-      #wdpa_n_invalid = sum(!st_is_valid(wdpa_all))
-      #cat(sprintf('wdpa_n_invalid after: %d\n', wdpa_n_invalid))
-    #}
-  })
-  wdpa_rds = file.path(wdpa_dir, 'WDPA_Sep2017-shapefile-polygons.rds')
-  saveRDS(wdpa_all, wdpa_rds)
+  #st_layers(wdpa_gdb)
+  # Driver: OpenFileGDB 
+  # Available layers:
+  #            layer_name geometry_type features fields
+  # 1  WDPA_point_Oct2017   Multi Point    18442     26
+  # 2 WDPA_source_Oct2017            NA      492     17
+  # 3   WDPA_poly_Oct2017 Multi Polygon   216026     30
+  wdpa_all = read_sf(dsn=wdpa_gdb, 'WDPA_poly_Oct2017')
+  
+  # check if your layer contains problematic MULTISURFACE geometries
+  if ('MULTISURFACE' %in% unique(st_geometry_type(st_geometry(wdpa_all)))){
+    # Error in slice_impl(.data, dots) : 
+    #   Evaluation error: Evaluation error: ParseException: Unknown WKB type 12.
+    wdpa_all = wdpa_all %>%
+      st_cast('MULTIPOLYGON') # 72 sec
+  }
+  write_sf(wdpa_all, wdpa_shp) # 16.8 min
+  gdalUtils::ogr2ogr(wdpa_shp, wdpa_gpkg, layer='WDPA_poly_Oct2017', f='GPKG', overwrite=T) # 3.9 min
+  # [Tidying feature geometries with sf](http://r-spatial.org/r/2017/03/19/invalid.html#tidying-feature-geometries)
 }
 if (!exists('wdpa_all')){
-  #wdpa_all = readRDS(wdpa_rds)
+  wdpa_all = read_sf(dsn=wdpa_gpkg, 'WDPA_poly_Oct2017') # 8.6 min
 }
+
+# world bbox
+world_wkt = 'POLYGON ((-180 -90, 180 -90, 180 90, -180 90, -180 -90))'
+world_sf = readWKT(world_wkt) %>% st_as_sf() %>% st_set_crs(4326)
 
 # fetch-obis-by-eez ----
 territories = eez_smp %>% filter(pol_type == '200NM') %>% .$territory1 %>% sort()
-for (i in seq_along(territories)){
-#for (ter in c('Galapagos','Colombia','Costa Rica','Ecuador','Panama')){
+#for (i in seq_along(territories)){
+for (ter in c('Galapagos','Colombia','Costa Rica','Ecuador','Panama')){ # ter = 'Colombia'; 
+#for (ter in c('Costa Rica','Ecuador','Panama')){ # ter = 'Colombia'; # ter = 'Alaska'
+  i = which(territories==ter)
   
-  #ter = 'Galapagos' # ter = 'Colombia' # sort(eez_smp$territory1)
+  #ter = 'Galapagos' # ter = 'Colombia'; 
   ter   = territories[i]
   ter_f = str_replace_all(ter, ' ', '_')
   
   cat(sprintf('%d of %d: %s - %s\n', i, length(territories), ter, Sys.time()))
   
-  wkt_txt  = sprintf('%s/eez-%s_wkt.txt', dir_data, ter_f)
-  obis_geo = sprintf('%s/eez-%s_obis.geojson', dir_data, ter_f)
-  obis_csv = sprintf('%s/eez-%s_obis.csv', dir_data, ter_f)
-  wdpa_geo = sprintf('%s/eez-%s_wdpa.geojson', dir_data, ter_f)
-  obis_wdpa_csv        = sprintf('%s/eez-%s_obis_wdpa.csv', dir_data, ter_f)
-  obis_wdpa_metric_txt = sprintf('%s/eez-%s_obis_wdpa_metric.txt', dir_data, ter_f)
+  wkt_txt       = sprintf('%s/eez-%s_wkt.txt', dir_data, ter_f)
+  obis_geo      = sprintf('%s/eez-%s_obis.geojson', dir_data, ter_f)
+  obis_csv      = sprintf('%s/eez-%s_obis.csv', dir_data, ter_f)
+  wdpa_geo      = sprintf('%s/eez-%s_wdpa.geojson', dir_data, ter_f)
+  obis_wdpa_csv = sprintf('%s/eez-%s_obis_wdpa.csv', dir_data, ter_f)
+  metrics_csv   = sprintf('%s/eez-%s_metrics.csv', dir_data, ter_f)
+  
+  # get eez for territory, original and simplified
+  ter_sf = eez_all  %>%
+    filter(
+      pol_type == '200NM',
+      territory1==ter)
+  
+  ter_smp_sf = eez_smp %>%
+    filter(
+      pol_type == '200NM',
+      territory1==ter)
+  
+  # TEMP FIX
+  if (file.exists(wkt_txt)){
+    # redo wkt if outside world [-180, 180]
+    # 1 of 230: Alaska - 2017-10-02 17:06:50
+    # Error in robis2::occurrence(geometry = wkt) : 
+    #   Internal Server Error (HTTP 500).
+    wkt = readLines(wkt_txt)
+    bb = readWKT(wkt) %>% st_as_sf() %>%
+      st_bbox()
+    if (bb['xmax'] > 180 | bb['xmin'] < -180){
+      cat("  REDO wkt: bb['xmax'] > 180 | bb['xmin'] < -180!\n")
+      file.remove(wkt_txt)
+    }
+  }
   
   if (!file.exists(wkt_txt)){
-    wkt = eez_smp %>%
-      filter(
-        pol_type == '200NM',
-        territory1==ter) %>%
+    wkt = ter_smp_sf %>%
       st_buffer(dist=0.1) %>%
       st_convex_hull() %>%
+      st_intersection(world_sf) %>%
       st_geometry() %>%
       st_as_text()
     
@@ -177,29 +204,18 @@ for (i in seq_along(territories)){
         st_as_text()
     }
     
-    #old: "MULTIPOLYGON(((-81.54267595 12.0980556, -79.44154756 13.87745643, -73.45708733 15.13332554, -71.1315372 12.75828467, -75.39491029 10.51404426, -77.90466345 12.26324209, -81.54267595 12.0980556)), ((-78.6685557 1.42839193, -83.7965417 1.3566667, -84.3166667 5.1, -79.9217019 5.1, -77.93470224 7.31114837, -77.0248035 3.68909216, -78.6685557 1.42839193)))"
-    # new w/ st_convex_hull(): POLYGON((-78.76095865 1.29069778, -83.79787516 1.35667559, -84.90682908 3.04724628, -84.41252901 5.02846783, -82.08530671 12.86513453, -79.24309222 15.06604623, -71.30800075 14.98762145, -70.67508796 11.64431718, -77.70543696 2.48822948, -78.76095865 1.29069778))
-    
     write_lines(wkt, wkt_txt)
   }
   wkt = readLines(wkt_txt)
-  
-  # 1 of 230: Alaska - 2017-10-02 17:06:50
-  # Error in robis2::occurrence(geometry = wkt) : 
-  #   Internal Server Error (HTTP 500).
-  bb = readWKT(wkt) %>% st_as_sf() %>%
-    st_bbox()
-  if (bb['xmax'] > 180 | bb['xmin'] < -180){
-    warning("  bb['xmax'] > 180 | bb['xmin'] < -180")
-    next()
-  }
-  
+
   if (any(!file.exists(obis_geo), !file.exists(obis_csv))){
     # fetch OBIS occurrences
     obis_tbl = robis2::occurrence(geometry=wkt) %>%
       as_tibble()
     for (fld in c('year','eventDate','depth','taxonRank')){
-      obis_tbl[fld] = NA
+      if (!fld %in% names(obis_tbl)){
+        obis_tbl[fld] = NA
+      }
     }
     obis_tbl = obis_tbl %>%
       select(
@@ -212,8 +228,7 @@ for (i in seq_along(territories)){
         qc) %>%
       arrange(kingdom, taxonomicgroup, scientificName, year, id) %>%
       mutate(
-        occurrence_id = sprintf('obis:%s:%d', ter, row_number())) # TODO: unique ID in OBIS?!
-    
+        occurrence_id = sprintf('obis-eez:%s:%d', ter, row_number())) # TODO: unique ID in OBIS?!
     # View(obis_tbl)
     
     # drop unneeded OBIS columns: moot with select() above, retained for explicitness of dropped columns to revisit
@@ -224,8 +239,10 @@ for (i in seq_along(territories)){
     cklist = robis::checklist(geometry=wkt) # cklist_0 = cklist # View(cklist_0)
     # get unique taxonomic name (tname), prioritizing with first non-NA of:
     #  valid, worms_id, redlist, status, phylum,...
-    for (fld in c('redlist','status')){
-      cklist[fld] = NA
+    for (fld in c('redlist','status')){ # table(cklist$status)
+      if (!fld %in% names(cklist)){
+        cklist[fld] = NA
+      }
     }
     cklist = cklist %>%
       rename(
@@ -265,14 +282,10 @@ for (i in seq_along(territories)){
         crs=4326, agr='constant')
     
     # rm points outside original unsimplified, unbuffered eez
-    eez = eez_all  %>%
-      filter(
-        pol_type == '200NM',
-        territory1==ter)
     obis_sf = obis_sf %>%
       slice(
         st_intersects(
-          eez,
+          ter_sf,
           obis_sf)[[1]])
     
     # write obis_geo with just id to save disk space, for later rejoining with obis_tbl
@@ -285,11 +298,11 @@ for (i in seq_along(territories)){
     # write obis_tbl to csv
     obis_sf %>%
       st_set_geometry(NULL) %>%
-      write_csv(obis_csv)
+      write_csv(obis_csv) # table(obis_sf$status)
   }
   
   # wdpa later
-  next()
+  #next()
   
   # read OBIS occurrences and join attributes
   obis_sf = read_sf(obis_geo) %>%
@@ -313,17 +326,12 @@ for (i in seq_along(territories)){
   #next()
   
   # extract-wdpa-by-eez ----
-  eez_sf = eez_all %>%
-    filter(
-      pol_type == '200NM',
-      territory1==ter)
-  
   if (!file.exists(wdpa_geo)){
-    
-    # filter by eez's within eez
+
+    # filter by wdpa's within eez
     wdpa_sf = wdpa_all %>%
-      slice(st_intersects(eez_sf, wdpa_all)[[1]])
-    
+      slice(st_intersects(ter_sf, wdpa_all)[[1]])
+
     if (nrow(wdpa_sf) == 0){
       warning('no wdpa')
       write_sf(wdpa_sf, wdpa_geo, delete_dsn=T)
@@ -336,12 +344,8 @@ for (i in seq_along(territories)){
       
       # extract intersection with eez
       wdpa_sf = wdpa_sf %>% 
-        st_intersection(eez_sf %>% select(territory1))
-      # TODO: Error in CPL_geos_op2(op, st_geometry(x), st_geometry(y)) : 
-      #   attr classes has wrong size: please file an issue
-      # st_geometry(wdpa_sf): GEOMETRY
-      # st_geometry(eez_sf):  MULTIPOLYGON
-      
+        st_intersection(ter_sf %>% select(territory1))
+
       # calculate area after extracting to eez
       wdpa_sf = wdpa_sf %>%
         mutate(
@@ -354,25 +358,26 @@ for (i in seq_along(territories)){
   
   # if (nrow(wdpa_sf) == 0){
   #   warning('no wdpa')
-  # } else {  
-  #   labels <- with(
-  #     wdpa_sf,
-  #     sprintf(
-  #       "<strong>%s</strong><br/>DESIG_ENG: %s<br/>DESIG_TYPE: %s<br/>IUCN CAT: %s<br/>GIS_M_AREA: %s",
-  #       NAME, DESIG_ENG, DESIG_TYPE, IUCN_CAT, comma(round(GIS_M_AREA,2)))) %>% lapply(HTML)
-  #   
-  #   leaflet(eez_sf) %>%
-  #     addProviderTiles(providers$Stamen.TonerLite) %>%
-  #     addPolygons() %>%
-  #     addPolygons(
-  #       data = wdpa_sf,
-  #       weight = 1,
-  #       color = 'green', fillColor = 'green',
-  #       label = labels,
-  #       highlight = highlightOptions(
-  #         color = 'yellow',
-  #         weight = 5,
-  #         bringToFront = T))
+  # } else {
+    # labels <- with(
+    #   wdpa_sf,
+    #   sprintf(
+    #     "<strong>%s</strong><br/>DESIG_ENG: %s<br/>DESIG_TYPE: %s<br/>IUCN CAT: %s<br/>GIS_M_AREA: %s",
+    #     NAME, DESIG_ENG, DESIG_TYPE, IUCN_CAT, comma(round(GIS_M_AREA,2)))) %>% lapply(HTML)
+    # 
+    # leaflet(ter_sf) %>%
+    #   addProviderTiles(providers$Stamen.TonerLite) %>%
+    #   addPolygons() %>%
+    #   addPolygons(
+    #     data = wdpa_sf, #%>%
+    #       #filter(IUCN_CAT %in% c('Ia', 'Ib', 'II', 'III', 'IV', 'V', 'VI')),
+    #     weight = 1,
+    #     color = 'green', fillColor = 'green',
+    #     label = labels,
+    #     highlight = highlightOptions(
+    #       color = 'yellow',
+    #       weight = 5,
+    #       bringToFront = T))
   # }
   
   # join-obis-wdpa ----
@@ -383,10 +388,10 @@ for (i in seq_along(territories)){
       select(occurrence_id) %>%
       st_join(
         wdpa_sf %>%
-          select(WDPA_PID))
+          select(WDPA_PID),
+        left=F)
     # NOTE: multiple MPAs can occur at a single OBIS occurrence point
-    
-    # TODO: continue...
+
     o_sf %>%
       st_set_geometry(NULL) %>%
       write_csv(obis_wdpa_csv)
@@ -394,9 +399,26 @@ for (i in seq_along(territories)){
   obis_wdpa = read_csv(obis_wdpa_csv)
   
   # calc-metric ----
-  if (!file.exists(obis_wdpa_metric_txt)){
+  if (!file.exists(metrics_csv)){
+    # TODO: weight by level of protection? 
+    IUCN_protection = c(
+      Ia  = 'Strict Nature Reserve',
+      Ib  = 'Wilderness area',
+      II  = 'National Park',
+      III = 'Natural Monument or feature',
+      IV  = 'Habitat/species management area',
+      V   = 'Protected landscape/seascape',
+      VI  = 'Protected area with sustainable use of natural resources')
+    # other to be discarded?: Not Applicable, Not Assigned, Not Reported
+    #   excluding means no OBIS pts in MPAs, eg Galapagos, so NA or 1 metric?
+    
     # summarize by single OBIS occurrence_id
     obis1_wdpa = obis_wdpa %>%
+      mutate(
+        WDPA_PID = as.character(WDPA_PID)) %>%
+      left_join(
+        wdpa_all, by = 'WDPA_PID') %>%
+      #filter(IUCN_CAT %in% c('Ia', 'Ib', 'II', 'III', 'IV', 'V', 'VI')) %>%
       group_by(occurrence_id) %>%
       summarize(
         wdpa_pids = paste(WDPA_PID, collapse=',')) # populate list of WDPA park ids
@@ -409,55 +431,68 @@ for (i in seq_along(territories)){
       left_join(
         obis1_wdpa,
         by='occurrence_id') %>%
+      #select(occurrence_id, taxonomicgroup, status, wdpa_pids) %>% View()
       filter(
         !is.na(status),
-        status %in% names(wts_status)) %>%
+        status %in% names(wts_status)) %>% # View()
       mutate(
         wdpa_pids = ifelse(wdpa_pids=='NA', NA, wdpa_pids),  # weird 'NA', not NA
         in_mpa    = ifelse(!is.na(wdpa_pids), TRUE, FALSE),
-        status_wt = wts_status[status]) %>%
+        status_wt = wts_status[status]) %>% # View()
       group_by(
-        taxonomicgroup, in_mpa) %>%
+        taxonomicgroup, in_mpa) %>% # View() # table(d$taxonomicgroup, useNA='ifany') ; table(d$in_mpa, useNA='ifany')
       summarise(
         status_wt         = mean(status_wt), # NOTE: weighted by number of occurrences
         n_scientificNames = length(unique(scientificName)),
         n_occurrences     = n()) # %>% ungroup()
-    # d
-    # sum(d$n_occurrences)
-    # nrow(obis_sf)
+
+    if (length(setdiff(c(TRUE,FALSE), d$in_mpa)) > 0 ){
+      # need in and out of MPA to come up with metric
+      m = NA
+      cat('  NA metrics_csv b/c need TRUE & FALSE in_mpa\n')
+    } else {
+      d_dif = d %>%
+        select(taxonomicgroup, in_mpa, status_wt) %>%
+        spread(in_mpa, status_wt) %>%
+        rename(
+          avg_status_wt_outside_mpa = `FALSE`,
+          avg_status_wt_inside_mpa = `TRUE`) %>%
+        mutate(
+          status_dif = avg_status_wt_inside_mpa - avg_status_wt_outside_mpa,
+          # fully  protected (in - out): 1   -   0 =  1
+          # evenly protected (in - out): 0.5 - 0.5 =  0
+          # NOT    protected (in - out): 0   -   1 = -1
+          status     = rescale(status_dif, to=c(0, 1), from=c(-1, 1))
+          # fully  protected:   1
+          # evenly protected: 0.5
+          # NOT    protected:   0
+        ) %>%
+        filter(!is.na(status))
+      
+      # assign weights to taxonomicgroup based on species richness regardless of having RedList status
+      wts_taxa = d %>%
+        group_by(taxonomicgroup) %>%
+        summarize(
+          n_scientificNames = sum(n_scientificNames)) %>% # NOTE: repeats in/out mpa
+        mutate(
+          wt = rescale(n_scientificNames))
+      # wts_taxa
+      
+      m = weighted.mean(
+        x = d_dif$status, 
+        w = setNames(
+          wts_taxa$wt,
+          wts_taxa$taxonomicgroup)[
+            d_dif$taxonomicgroup])
+    }
     
-    d_dif = d %>%
-      select(taxonomicgroup, in_mpa, status_wt) %>%
-      spread(in_mpa, status_wt) %>%
-      rename(
-        avg_status_wt_outside_mpa = `FALSE`,
-        avg_status_wt_inside_mpa = `TRUE`) %>%
-      mutate(
-        status_dif = avg_status_wt_outside_mpa - avg_status_wt_inside_mpa)
-    # fully unprotected (out - in): 1   -   0 =  1
-    # evenly  protected (out - in): 0.5 - 0.5 =  0
-    # fully   protected (out - in): 0   -   1 = -1
-    # d_dif
-    
-    d_dif = d_dif %>%
-      filter(
-        !is.na(status_dif))
-    
-    wts_taxa = d %>%
-      group_by(taxonomicgroup) %>%
-      summarize(
-        n_scientificNames = sum(n_scientificNames)) %>% # NOTE: repeats in/out mpa
-      mutate(
-        wt = rescale(n_scientificNames))
-    # wts_taxa
-    
-    m = weighted.mean(
-      x = d_dif$status_dif, 
-      w = setNames(
-        wts_taxa$wt,
-        wts_taxa$taxonomicgroup)[
-          d_dif$taxonomicgroup])
-    
-    write_lines(m, obis_wdpa_metric_txt)
+    tbl_metrics = tibble(
+      eez_territory1 = ter,
+      eez_pol_type = '200NM',
+      n_obs = nrow(obis_sf),
+      n_spp = length(unique(obis_sf$scientificName)),
+      idx_obis_wdpa = m)
+      
+    write_csv(tbl_metrics, metrics_csv)
   }
 }

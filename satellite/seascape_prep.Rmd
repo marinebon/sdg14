@@ -3,9 +3,7 @@ title: "seascapes"
 output: html_document
 ---
 
-## Mat to grd
-
-```{r mat to grd, eval=F}
+```{r setup}
 library(tidyverse)
 library(R.matlab)
 library(raster)
@@ -17,7 +15,34 @@ if (basename(getwd()) != 'docs') setwd('docs')
 dir_mat = '/mbon/data_big/satellite/seascapes/gl'
 grd   = file.path(dir_mat, 'GLOBE14_I90VAR3_9k.grd')
 grd_l = file.path(dir_mat, 'GLOBE14_I90VAR3_9k_leaflet.grd')
+```
 
+
+## nc
+
+```{r}
+library(raster)
+
+library(ncdf4)
+
+nc = '/Users/bbest/Downloads/GLOBE14_I90VAR4_SM4k_2002182.nc'
+
+r_class = raster(nc, 'CLASS')
+d = ncdf4::nc_open(nc)
+d
+
+d_class = ncdf4::ncvar_get(d, 'CLASS')
+
+dim(d_class)
+plot(d_class)
+
+
+```
+
+
+## Mat to grd
+
+```{r mat to grd, eval=F}
 mats = tibble(
   mat = list.files(dir_mat, '\\.mat$')) %>%
   mutate(
