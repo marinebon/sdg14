@@ -10,7 +10,7 @@ library(raster)
 library(stringr)
 library(lubridate)
 
-if (basename(getwd()) != 'docs') setwd('docs')
+if (basename(getwd()) != 'satellite') setwd('satellite')
 
 dir_mat = '/mbon/data_big/satellite/seascapes/gl'
 grd   = file.path(dir_mat, 'GLOBE14_I90VAR3_9k.grd')
@@ -322,12 +322,127 @@ for (nc_path in chl_nc){ # nc_path = chl_nc[1]
 }
 ```
 
+```{r prep sst}
+library(tidyverse)
+library(ncdf4)
+library(raster)
+library(stringr)
+library(lubridate)
+
+if (basename(getwd()) != 'satellite') setwd('satellite')
+
+data_dir = '/mbon/data_big/satellite/sst4/anom_27km'
+nc_files = list.files(data_dir, '.*\\.nc$', full.names=T)
+  
+for (nc_path in nc_files){ # nc_path = nc_files[1]
+  
+  grd   = sprintf('%s.grd', tools::file_path_sans_ext(nc_path))
+  grd_l = sprintf('%s_leaflet.grd', tools::file_path_sans_ext(nc_path))
+  
+  if (!file.exists(grd)){
+  
+    # fetch nc
+    nc = nc_open(nc_path)
+    lon = ncvar_get(nc, 'longitude')[,1]
+    lat = ncvar_get(nc, 'latitude')[1,]
+    #vars = str_subset(names(nc$var), '.*_chlor_a_clim$')
+    vars = c('mean','anomaly','z-score')
+    
+    # extract rasters
+    s = stack(raster(nc_path, varname=vars[1]))
+    for (v in vars[-1]){
+      s = stack(s, raster(nc_path, varname=v))
+    }
+    names(s) = vars
+    
+    # realign spatial
+    s = flip(s, direction='y')
+    s <- setExtent(s, extent(min(lon), max(lon), min(lat), max(lat)))
+    crs(s) <- leaflet:::epsg4326
+    
+    # write out
+    writeRaster(s, grd, overwrite=T)
+  }
+  
+  # rasters for leaflet
+  if (!file.exists(grd_l)){
+  #if (T){
+  #if (nc_path != '/mbon/data_big/satellite/chlor_a/clim_27km/A20032007_chlor_a_CLIM_MO_GLOB_27km.nc'){
+    s = stack(grd)
+    s_l = leaflet::projectRasterForLeaflet(s)
+
+    # # rename layers to dates, using mid-month day of 15th
+    # yr = 2005
+    # # TODO: vary yr with input grd based on filename
+    # dates = as.Date(plyr::mapvalues(
+    #   names(s),
+    #   sprintf('%s_chlor_a_clim', month.name),
+    #   sprintf('%s-%02d-15', yr, 1:12)))
+    # names(s_l) = format(dates, 'ymd_%Y.%m.%d')
+
+    writeRaster(s_l, grd_l, overwrite=T)
+  }
+}
+```
+
+```{r extract sst fasterize}
+library(fasterize) # devtools::install_github("ecohealthalliance/fasterize")
+
+data_dir  = '/mbon/data_big/satellite/sst4/anom_27km'
+grd_files = list.files(data_dir, '.*27km\\.grd$', full.names=T)
+grd = grd_files[1]
+
+r = brick(grd) # plot(r[['mean']])
+
+eez_s005_shp = '/mbon/data_big/technical/boundaries/eez_derived/eez_s005.shp'
+eez_sp = read_sf(eez_s005_shp) %>% as('Spatial')
+eez_sp$GeoName #[duplicated(eez_sp$GeoName)]
+plot(eez_sp['GeoName'])
+
+# TODO: zonal area
+system.time({
+  s_e = raster::extract(s, eez_sp, na.rm=T, df=T)
+}) # 2.7 hrs for seascapes/GLOBE14_I90VAR3_9k.grd; 2.3 min for clim_27km/
+
+write_rds(s_e, '/mbon/data_big/satellite/seascapes/gl/gl-seascape-eez-extract.Rdata')
+s_e = read_rds('/mbon/data_big/satellite/seascapes/gl/gl-seascape-eez-extract.Rdata')
+
+select = dplyr::select
+d = eez_sp@data %>%
+  select(MRGID) %>%
+  mutate(
+    ID = row_number()) %>%
+  left_join(
+    s_e,
+    by='ID') %>%
+  gather(lyr, category, -MRGID, -ID, -area_km2, na.rm=T) %>%
+  group_by(MRGID, lyr, category) %>%
+  summarize(
+    area_km2 = sum(area_km2)) %>%
+  mutate(
+    yj   = str_replace(lyr, 'lyr', ''),
+    date = as.Date(sprintf('%s-01-01', str_sub(yj,1,4))) + days(as.integer(str_sub(yj,5,8))-1)) %>%
+  ungroup() %>%
+  mutate(category = as.integer(category)) %>%
+  arrange(date, MRGID, category) %>%
+  select(date, MRGID, category, area_km2)
+
+
+```
+
 
 ## Maps
 
+```{r quick}
+library(leaflet)
+library(raster)
+
+```
+
+
 The legend title describes the value [CLASS|P].[OCI|sw] and the layers are labeled according to month and day (MMDD) of the start.
 
-```{r leaflet, warning=F, message=F}
+```{r leaflet seascape, warning=F, message=F}
 library(tidyverse)
 library(raster)
 library(leaflet)

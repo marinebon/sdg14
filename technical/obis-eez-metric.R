@@ -143,9 +143,9 @@ world_wkt = 'POLYGON ((-180 -90, 180 -90, 180 90, -180 90, -180 -90))'
 world_sf = readWKT(world_wkt) %>% st_as_sf() %>% st_set_crs(4326)
 
 # fetch-obis-by-eez ----
-territories = eez_smp %>% filter(pol_type == '200NM') %>% .$territory1 %>% sort()
+territories = eez_smp %>% filter(pol_type == '200NM') %>% .$territory1 %>% as.character() %>% sort()
 #for (i in seq_along(territories)){
-for (i in 2:length(territories)){
+for (i in 28:length(territories)){ # TODO: Alaska on laptop?
 #for (ter in c('Galapagos','Colombia','Costa Rica','Ecuador','Panama')){ # ter = 'Colombia'; 
 #for (ter in c('Costa Rica','Ecuador','Panama')){ # ter = 'Colombia'; # ter = 'Alaska'
 #   i = which(territories==ter)
@@ -317,9 +317,14 @@ for (i in 2:length(territories)){
   #next()
   
   # read OBIS occurrences and join attributes
+  obis_tbl = read_csv(obis_csv)
+  if (nrow(obis_tbl) == 0){
+    cat('  SKIPPING: 0 OBIS records\n')
+    next()
+  }
   obis_sf = read_sf(obis_geo) %>%
     left_join(
-      read_csv(obis_csv),
+      obis_tbl,
       by='occurrence_id')
   
   # leaflet(obis_sf) %>%
@@ -529,18 +534,50 @@ for (i in 2:length(territories)){
 
 # metrics
 d_metrics = list.files(dir_data, '^eez-.*_metrics\\.csv$', full.names=T) %>%
-  lapply(read_csv) %>%
-  bind_rows()
-write_csv(d_metrics, file.path(dir_data, '_eez_obis_metrics.csv'))
-
-# obis
-d_taxa = list.files(dir_data, '^eez-.*_obis\\.csv$', full.names=T) %>%
   map(
     ~ read_csv(.x) %>% 
       mutate(
-        Territory1 = str_replace(.x, '.*/eez-(.*)_obis.csv', '\\1'))) %>%
+        eez_territory1 = as.character(eez_territory1),
+        eez_pol_type   = as.character(eez_pol_type),
+        n_obs          = as.integer(n_obs),
+        n_spp          = as.integer(n_spp),
+        idx_obis_wdpa  = as.double(idx_obis_wdpa))) %>%
+  bind_rows()
+d_metrics = eez_smp %>% 
+  st_set_geometry(NULL) %>%
+  filter(pol_type == '200NM') %>% 
+  mutate(
+    eez_territory1 = as.character(territory1),
+    eez_pol_type   = '200NM') %>%
+  arrange(eez_territory1) %>%
+  select(eez_territory1, eez_pol_type) %>%
+  left_join(
+    d_metrics,
+    by=c('eez_territory1','eez_pol_type'))
+write_csv(d_metrics, file.path(dir_data, '_eez_obis_metrics.csv'))
+
+# obis
+fun_taxa = function(csv){
+  # csv = '/mbon/data_big/biodiversity/eez-Yemen_obis.csv'
+  cat(paste(csv, '\n'))
+  d = read_csv(csv)
+  
+  if (nrow(d) == 0){
+    res = NULL
+    cat('  NULL\n')
+  } else {
+    res = d %>%
+      select(taxonomicgroup, kingdom, phylum, class, order, family, genus, species, scientificName) %>%
+      mutate(
+        eez_territory1 = str_replace(csv, '.*/eez-(.*)_obis.csv', '\\1'))
+  }
+  res
+}
+
+d_taxa = list.files(dir_data, '^eez-.*_obis\\.csv$', full.names=T) %>%
+  map(fun_taxa) %>%
   bind_rows() %>%
-  group_by(Territory1, taxonomicgroup, kingdom, phylum, class, order, family, genus, species) %>%
+  group_by(eez_territory1, taxonomicgroup, kingdom, phylum, class, order, family, genus, species) %>%
   summarize(
     n_obs = n(),
     n_spp = length(unique(scientificName))) %>%
@@ -548,6 +585,6 @@ d_taxa = list.files(dir_data, '^eez-.*_obis\\.csv$', full.names=T) %>%
   left_join(
     d_metrics %>%
       select(eez_territory1, idx_obis_wdpa),
-    by = c('Territory1'='eez_territory1'))
+    by = 'eez_territory1')
 write_csv(d_taxa, file.path(dir_data, '_eez_obis_taxa.csv'))
 
