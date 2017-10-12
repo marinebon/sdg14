@@ -149,7 +149,13 @@ territories = eez_smp %>% filter(pol_type == '200NM') %>% .$territory1 %>% as.ch
 #   001 of 230: Alaska - 2017-10-10 23:12:16
 #   Error in CPL_geos_op2(op, st_geometry(x), st_geometry(y)) : 
 #     Evaluation error: TopologyException: Input geom 0 is invalid: Ring Self-intersection at or near point -148.37773894399993 60.75520225300005 at -148.37773894399993 60.75520225300005.
-for (i in 2:seq_along(territories)){
+
+# 036 of 230: Canada - 2017-10-12 04:55:59
+# Retrieved 6620000 records of 6713332 (98%)
+# Error in curl::curl_fetch_memory(url, handle = handle) : 
+#   Operation was aborted by an application callback
+
+for (i in 136:length(territories)){
 #for (i in 28:length(territories)){ # TODO: Alaska on laptop?
 #for (ter in c('Galapagos','Colombia','Costa Rica','Ecuador','Panama')){ # ter = 'Colombia'; 
 #for (ter in c('Costa Rica','Ecuador','Panama')){ # ter = 'Colombia'; # ter = 'Alaska'
@@ -353,7 +359,7 @@ for (i in 2:seq_along(territories)){
     # filter by wdpa's within eez
     wdpa_sf = wdpa_all %>%
       slice(st_intersects(ter_sf, wdpa_all)[[1]])
-
+    
     if (nrow(wdpa_sf) == 0){
       warning('no wdpa')
       write_sf(wdpa_sf, wdpa_geo, delete_dsn=T)
@@ -365,9 +371,20 @@ for (i in 2:seq_along(territories)){
           area_wdpa_orig_km2 = st_area(st_geometry(wdpa_sf)))
       
       # extract intersection with eez
+      # TODO: fix Alaska [i=1] post eez-Alaska__obis.csv
+      #   001 of 230: Alaska - 2017-10-10 23:12:16
+      #   Error in CPL_geos_op2(op, st_geometry(x), st_geometry(y)) : 
+      #     Evaluation error: TopologyException: Input geom 0 is invalid: Ring Self-intersection at or near point -148.37773894399993 60.75520225300005 at -148.37773894399993 60.75520225300005.
       wdpa_sf = wdpa_sf %>% 
         st_intersection(ter_sf %>% select(territory1))
-
+      
+      # ensure proper geometry, eg line slivers with Micronesia (i=136)
+      if (any(st_geometry_type(st_geometry(wdpa_sf)) != "MULTIPOLYGON")){
+        cat('  CASTING to MULTIPOLYGON\n')
+        wdpa_sf = wdpa_sf %>% 
+          st_cast("MULTIPOLYGON")
+      }
+      
       # calculate area after extracting to eez
       wdpa_sf = wdpa_sf %>%
         mutate(
@@ -378,11 +395,17 @@ for (i in 2:seq_along(territories)){
         wdpa_sf = rename(wdpa_sf, WDPA_PID = WDPA_PI)
       }
       
+      # only admit valid geometries
+      #   TODO: fix with st_make_valid() but not on mbon server (need lwgeom), 
+      #         eg line slivers with Micronesia (i=136)
+      #         http://r-spatial.org/r/2017/03/19/invalid.html
+      wdpa_sf = wdpa_sf[which(st_is_valid(wdpa_sf)),]
+      
       write_sf(wdpa_sf, wdpa_geo, delete_dsn=T)
     }
   }
   wdpa_sf = read_sf(wdpa_geo)
-  
+
   # if (nrow(wdpa_sf) == 0){
   #   warning('no wdpa')
   # } else {
@@ -420,6 +443,7 @@ for (i in 2:seq_along(territories)){
     } else {
     
       # join fields with prefix identifying source
+      # "Evaluation error: IllegalArgumentException: Invalid number of points in LinearRing found 3 - must be 0 or >= 4."
       o_tbl = obis_sf %>%
         select(occurrence_id) %>%
         st_join(
