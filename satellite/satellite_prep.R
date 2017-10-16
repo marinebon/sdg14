@@ -2,6 +2,7 @@
 # 1. read nc/mat to brick to indiv raster
 # 1. optimize raster output
 #   - [Raster Data Optimization — GeoServer Training](http://geoserver.geo-solutions.it/edu/en/enterprise/raster.html)
+#   - [Data Considerations — GeoServer 2.13.x User Manual](http://docs.geoserver.org/latest/en/user/production/data.html)
 
 # packages ----
 library(tools)
@@ -9,10 +10,14 @@ library(tidyverse)
 library(stringr)
 library(lubridate)
 library(rgdal)
-library(gdalUtils)
 library(ncdf4)
 library(raster)
+# install.packages(c('gdalUtils','leaflet'))
+library(gdalUtils)
 library(leaflet)
+
+# package options ----
+rasterOptions(tmpdir='/mbon-local/tmp-raster') 
 
 # paths & vars ----
 if (basename(getwd()) != 'satellite') setwd('satellite')
@@ -22,53 +27,8 @@ dir_root = switch(
   'Darwin'  = '/Volumes/Best HD/mbon_data_big', # BB's Mac
   'Windows' = 'P:',                             # constance.bren.ucsb.edu
   'Linux'   = '/mbon/data_big')                 # mbon.marine.usf.edu
-
-dir_wms = '/mbon/geoserver/satellite' # TODO: generalize for laptop
-
-sat_products = list(
-  # each element is a uniquely identified data product with parameters for processing
-  'gl_sst_curr_09km_mo' = list(
-    'area'     = 'global',
-    'content'  = 'sst',
-    'is_clim'  = F,
-    'res_km'   = 9,
-    'step'     = 'month',
-    'dir'      = 'satellite/sst4/anom_9km',
-    'f_ext'    = 'nc',
-    'f_var'    = 'mean',
-    'redo'     = F),
-  'gl_sst_clim_09km_mo' = list(
-    'area'     = 'global',
-    'content'  = 'sst',
-    'is_clim'  = T,
-    'res_km'   = 9,
-    'step'     = 'month',
-    'clim_beg' = '', 
-    'clim_end' = '', 
-    'dir'      = 'satellite/sst4/clim_9km',
-    'f_ext'    = 'nc',
-    'redo'     = F),
-  'gl_chl_clim_09km_mo' = list(
-    'area'     = 'global',
-    'content'  = 'chl',
-    'is_clim'  = T,
-    'res_km'   = 9,
-    'step'     = 'month',
-    'clim_beg' = '', 
-    'clim_end' = '', 
-    'dir'      = 'satellite/chlor_a/clim_9km',
-    'f_ext'    = 'nc',
-    'redo'     = F),
-  'gl_chl_curr_09km_mo' = list(
-    'area'     = 'global',
-    'content'  = 'chl',
-    'is_clim'  = T,
-    'res_km'   = 9,
-    'step'     = 'month',
-    'dir'      = 'satellite/chlor_a/anom_9km',
-    'f_ext'    = 'nc',
-    'f_var'    = 'mean',    
-    'redo'     = F))
+dir_wms = '/mbon-local/geoserver/satellite' # TODO: generalize for laptop
+sat_csv = 'satellite_products.csv'
 # TODO: gl_sea_[curr|clim]_09km_mo
 
 # helper functions ----
@@ -130,74 +90,87 @@ f2raster = function(f, p){ # f
   r
 }
 
-r2tif4gs = function(r, p){
+r2tif4gs = function(r, p, tif){
   # optimize for Geoserver WMS
   # [Data Considerations — GeoServer 2.13.x User Manual](http://docs.geoserver.org/latest/en/user/production/data.html)
   
   # project to Mercator for consuming by leaflet
-  proj_method = ifelse(p[['is_clim']], 'ngb', 'bilinear')
+  proj_method = ifelse(p[['is_clim']], 'ngb'    , 'bilinear')
+  tran_method = ifelse(p[['is_clim']], 'nearest', 'bilinear')
+  addo_method = ifelse(p[['is_clim']], 'nearest', 'average')
+  
   # r0 = r # r = r0
   r = projectRaster(r, res=p[['res_km']]*1000, crs=leaflet:::epsg3857, method=proj_method)
   # TODO: Warning message: 106 projected point(s) not finite
   
   tif_tmp1 = tempfile(fileext = '.tif')  # tif_tmp1 = tif_tmp; rm(tif_tmp)
-  tif_tmp2 = tempfile(fileext = '.tif')
-  writeRaster(r, tif_tmp1)
-  # file.exists(tif_tmp1); file.size(tif_tmp1)/(1000*1000) # MB
+  tif_tmp2 = tempfile(fileext = '.tif')  # tif_tmp1 = tif_tmp; rm(tif_tmp)
+  writeRaster(r, tif_tmp1, options=c('COMPRESS=NONE'), overwrite=T) # file.exists(tif_tmp1); file.size(tif_tmp1)/(1000*1000) # MB
   
-  gdal_translate(tif_tmp1, tif_tmp2, ot, strict, of = "GTiff", b, mask, expand, outsize, tr, r, scale, exponent, unscale, srcwin, projwin, projwin_srs, epo, eco, a_srs, a_ullr, a_nodata, mo, co, gcp, q, sds, stats, norat, oo, sd_index, output_Raster = FALSE, ignore.full_scan = TRUE, verbose = FALSE, ...)
+  # add inner tiles
+  gdal_translate(tif_tmp1, tif_tmp2, of = 'GTiff', co = 'TILED=YES', r=tran_method)
+  file.remove(tif_tmp1) # gdalinfo(tif)
   
-  file.create('/mbon/touch-rstudio.txt')
-  file.exists('/mnt/mbon-supplement')
-
+  # add overviews
+  gdaladdo(tif_tmp2, levels=c(2,4,8,16), r=addo_method)
   
+  file.copy(tif_tmp2, tif)
+  file.remove(tif_tmp2)
 }
 
 # iterate over satellite products ----
-
-for (i in 1:length(sat_products)){ # i = 1
+products = read_csv(sat_csv) %>%
+  filter(do==T) # View(products)
+for (i in 1:nrow(products)){ # i = 1
   
-  p       = sat_products[[1]]
-  p_key   = names(sat_products)[1]
+  p       = products[i,]
   dir_in  = file.path(dir_root, p[['dir']])
-  dir_out = file.path(dir_wms, p_key)
+  dir_out = file.path(dir_wms, p[['key']])
   
-  # cd /mnt/mbon-supplement
-  # sudo chgrp -R users geoserver
-  # sudo chmod -R 775 geoserver
   if (!dir.exists(dir_out))
     dir.create(dir_out)
   
   files = list.files(dir_in, sprintf('.*\\.%s$', p[['f_ext']]) , full.names=T)
   
-  cat(sprintf('\n%d of %d: %s\n  paths:\n    %s ->\n    %s\n  files: %d *.%s\n', i, length(sat_products), p_name, dir_in, dir_out, length(files), p[['f_ext']]))
+  cat(sprintf('\n%d of %d: %s\n  paths:\n    %s ->\n    %s\n  files: %d *.%s\n', i, nrow(products), p[['key']], dir_in, dir_out, length(files), p[['f_ext']]))
   
   # iterate over files ----
-  for (f in files){ # f = files[[1]]
+  t0 = Sys.time(); n_done = 0
+  for (j in seq_along(files)){ # j = 1
     
     # f vars
-    date_mid = f2date(f, p)
-    tif = sprintf('r_.tif')
-    tif      = sprintf('%s/r_%s.tif', dir_out, format(date_mid, '%Y%m%d'))
-    
-    
-    
-    # file (nc|mat) to raster
-    r = f2raster(f, p)
-    
-    # write rater, optimized for Geoserver WMS
-    r = r2tif4gs(f, p)
+    f = files[j]
+    tif = sprintf('%s/r_%s.tif', dir_out, f2date(f, p) %>% format('%Y%m%d'))
     
     # TODO: multiply for clim
+    if (!file.exists(tif) | p[['redo']]){
     
+      # report
+      t1 = Sys.time()
+      if (n_done > 0 ){
+        t_min_left = as.numeric((difftime(t1, t0, units='min') / n_done) * (length(files) - j))
+      } else {
+        t_min_left = -9999
+      }
+      cat(sprintf(
+        '  %03d of %d: %s -> %s [%s, %1.1f min to go]\n', 
+        j, length(files), basename(f), basename(tif), 
+        format(t1, tz='America/Los_Angeles',usetz=TRUE), t_min_left))
+      
+      
+      # file (nc|mat) to raster
+      r = f2raster(f, p)
+      
+      # write raster, optimized for Geoserver WMS
+      r2tif4gs(r, p, tif)
+      
+      n_done = n_done + 1
+    } # end: if (!file.exists(tif) | p[['redo']])
     
-    
-    
-  }
+  } # end: for (f in files)
+} # end: for (i in 1:length(products))
   
 
-  
-  
-
-}
-
+# TODO: create dir_out parameter files for GeoServer
+# * [Using the ImageMosaic plugin for raster time-series data — GeoServer 2.12.x User Manual](http://docs.geoserver.org/stable/en/user/tutorials/imagemosaic_timeseries/imagemosaic_timeseries.html)
+# * [Tile Caching with GeoWebCache — GeoServer Training](http://geoserver.geo-solutions.it/edu/en/enterprise/gwc.html)

@@ -1,0 +1,5 @@
+key,do,redo,area,content,is_clim,res_km,step,dir,f_ext,f_var
+gl_sst_curr_09km_mo,T,F,global,sst,F,9,month,satellite/sst4/anom_9km,nc,mean
+gl_sst_clim_09km_mo,F,F,global,sst,T,9,month,satellite/sst4/clim_9km,nc,mean
+gl_chl_curr_09km_mo,T,F,global,chl,F,9,month,satellite/chlor_a/anom_9km,nc,mean
+gl_chl_clim_09km_mo,F,F,global,chl,T,9,month,satellite/chlor_a/clim_9km,nc,mean
