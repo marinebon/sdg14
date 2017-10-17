@@ -17,7 +17,8 @@ library(gdalUtils)
 library(leaflet)
 
 # package options ----
-rasterOptions(tmpdir='/mbon-local/tmp-raster') 
+rasterOptions(tmpdir='/mbon-local/tmp-raster', tmptime=1) 
+# showTmpFiles(); removeTmpFiles()
 
 # paths & vars ----
 if (basename(getwd()) != 'satellite') setwd('satellite')
