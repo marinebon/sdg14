@@ -12,6 +12,14 @@ library(lubridate)
 
 if (basename(getwd()) != 'satellite') setwd('satellite')
 
+dir_root = switch(
+  Sys.info()[['sysname']],
+  'Darwin'  = '/Volumes/Best HD/mbon_data_big', # BB's Mac
+  'Windows' = 'P:',                             # constance.bren.ucsb.edu
+  'Linux'   = '/mbon/data_big')                 # mbon.marine.usf.edu
+dir_sat = file.path(dir_root, 'satellite')
+
+
 dir_mat = '/mbon/data_big/satellite/seascapes/gl'
 grd   = file.path(dir_mat, 'GLOBE14_I90VAR3_9k.grd')
 grd_l = file.path(dir_mat, 'GLOBE14_I90VAR3_9k_leaflet.grd')
@@ -20,7 +28,7 @@ grd_l = file.path(dir_mat, 'GLOBE14_I90VAR3_9k_leaflet.grd')
 
 ## nc
 
-```{r}
+```{r nc test, eval=F}
 library(raster)
 
 library(ncdf4)
@@ -83,7 +91,7 @@ writeRaster(s_l, grd_l, overwrite=T)
 ```
 
 
-```{r scrap}
+```{r scrap, eval=F}
 r <- raster(nc=5, nr=5)
 r[] <- runif(ncell(r)) * 2
 plot(r)
@@ -125,7 +133,7 @@ v <- raster::extract(r, polys, cellnumbers=TRUE)
 
 ## Extract EEZ
 
-```{r extract eez}
+```{r extract eez chl raster-extract}
 library(tidyverse) # http://tidyverse.org
 library(stringr)
 library(lubridate)
@@ -252,22 +260,6 @@ streamgraph(x, category, area_km2, date) %>%
   
 ```
 
-
-
-```{r streamgraph babynames}
-library(babynames)   # install.packages('babynames')
-library(streamgraph) # devtools::install_github('hrbrmstr/streamgraph')
-
-b = babynames %>%
-  filter(grepl("^Kr", name)) %>%
-  group_by(year, name) %>%
-  tally(wt=n) %>%
-  arrange(year, name)
-View(b)
-streamgraph(b, "name", "nn", "year")
-```
-
-
 ```{r prep chl}
 chl_dir = '/mbon/data_big/satellite/chlor_a/clim_27km'
 chl_nc = list.files(chl_dir, '.*\\.nc$', full.names=T)
@@ -331,13 +323,26 @@ library(lubridate)
 
 if (basename(getwd()) != 'satellite') setwd('satellite')
 
-data_dir = '/mbon/data_big/satellite/sst4/anom_27km'
-nc_files = list.files(data_dir, '.*\\.nc$', full.names=T)
+dir_data = file.path(dir_root, 'satellite/sst4/anom_27km')
+nc_files = list.files(dir_data, '.*\\.nc$', full.names=T)
+nc_clim  = file.path(dir_root, 'satellite/sst4/clim_27km/A20032016_sst4_CLIM_MO_GLOB_27km.nc')
+
+nc_files = c(
+  nc_files,
+  nc_clim)
+
+for (nc_path in nc_files){ # nc_path = nc_files[1] # nc_path = nc_clim
   
-for (nc_path in nc_files){ # nc_path = nc_files[1]
+  is_clim = ifelse(str_detect(nc_path, 'clim'), T, F)
   
   grd   = sprintf('%s.grd', tools::file_path_sans_ext(nc_path))
   grd_l = sprintf('%s_leaflet.grd', tools::file_path_sans_ext(nc_path))
+  
+  if (!is_clim){
+    yj       = str_sub(basename(nc_path), 2, 8)
+    date_mid = as.Date(sprintf('%s-01-01', str_sub(yj,1,4))) + days(as.integer(str_sub(yj,5,8))-1 + 14)
+    tif      = sprintf('%s/sst_%s.tif', dirname(nc_path), format(date_mid, '%Y%m%d'))
+  }
   
   if (!file.exists(grd)){
   
@@ -345,9 +350,14 @@ for (nc_path in nc_files){ # nc_path = nc_files[1]
     nc = nc_open(nc_path)
     lon = ncvar_get(nc, 'longitude')[,1]
     lat = ncvar_get(nc, 'latitude')[1,]
-    #vars = str_subset(names(nc$var), '.*_chlor_a_clim$')
-    vars = c('mean','anomaly','z-score')
     
+    # get vars
+    if (is_clim){
+      vars = str_subset(names(nc$var), '.*_sst4_clim$') # TODO: include *_sst4_clim_std
+    } else {
+      vars = c('mean','anomaly','z-score')
+    }
+
     # extract rasters
     s = stack(raster(nc_path, varname=vars[1]))
     for (v in vars[-1]){
@@ -364,71 +374,214 @@ for (nc_path in nc_files){ # nc_path = nc_files[1]
     writeRaster(s, grd, overwrite=T)
   }
   
+  # tif for geoserver time-series image mosaic
+  # http://docs.geoserver.org/latest/en/user/tutorials/imagemosaic_timeseries/imagemosaic_timeseries.html
+  if (!file.exists(tif)){
+    if (!is_clim){
+      r = raster(grd, layer='mean') # plot(r)
+      pal256 = colorRampPalette(RColorBrewer::brewer.pal(9, 'Reds'))(256)
+      pal256[c(1,round(256/2),256)] # "#FFF5F0" "#FB6A4A" "#67000D"
+      plot(r, col=pal256)
+      # mean(c(-4,36)) # -4, 36
+      writeRaster(r, tif, overwrite=T)
+    }
+  }
+  
   # rasters for leaflet
   if (!file.exists(grd_l)){
-  #if (T){
-  #if (nc_path != '/mbon/data_big/satellite/chlor_a/clim_27km/A20032007_chlor_a_CLIM_MO_GLOB_27km.nc'){
     s = stack(grd)
     s_l = leaflet::projectRasterForLeaflet(s)
-
-    # # rename layers to dates, using mid-month day of 15th
-    # yr = 2005
-    # # TODO: vary yr with input grd based on filename
-    # dates = as.Date(plyr::mapvalues(
-    #   names(s),
-    #   sprintf('%s_chlor_a_clim', month.name),
-    #   sprintf('%s-%02d-15', yr, 1:12)))
-    # names(s_l) = format(dates, 'ymd_%Y.%m.%d')
-
+    
+    if (is_clim){
+      # rename layers to dates, using mid-month day of 15th
+      yr = round(mean(c(2003, 2016)))
+      dates = as.Date(plyr::mapvalues(
+        names(s),
+        sprintf('%s_sst4_clim', month.name),
+        sprintf('%s-%02d-15', yr, 1:12)))
+      names(s_l) = format(dates, 'ymd_%Y.%m.%d')
+    }
+    
     writeRaster(s_l, grd_l, overwrite=T)
   }
 }
 ```
 
-```{r extract sst fasterize}
+```{r fasterize eez cellid 27km}
+library(tidyverse)
+library(sf)
 library(fasterize) # devtools::install_github("ecohealthalliance/fasterize")
-
-data_dir  = '/mbon/data_big/satellite/sst4/anom_27km'
-grd_files = list.files(data_dir, '.*27km\\.grd$', full.names=T)
-grd = grd_files[1]
-
-r = brick(grd) # plot(r[['mean']])
-
-eez_s005_shp = '/mbon/data_big/technical/boundaries/eez_derived/eez_s005.shp'
-eez_sp = read_sf(eez_s005_shp) %>% as('Spatial')
-eez_sp$GeoName #[duplicated(eez_sp$GeoName)]
-plot(eez_sp['GeoName'])
-
-# TODO: zonal area
-system.time({
-  s_e = raster::extract(s, eez_sp, na.rm=T, df=T)
-}) # 2.7 hrs for seascapes/GLOBE14_I90VAR3_9k.grd; 2.3 min for clim_27km/
-
-write_rds(s_e, '/mbon/data_big/satellite/seascapes/gl/gl-seascape-eez-extract.Rdata')
-s_e = read_rds('/mbon/data_big/satellite/seascapes/gl/gl-seascape-eez-extract.Rdata')
-
 select = dplyr::select
-d = eez_sp@data %>%
-  select(MRGID) %>%
-  mutate(
-    ID = row_number()) %>%
-  left_join(
-    s_e,
-    by='ID') %>%
-  gather(lyr, category, -MRGID, -ID, -area_km2, na.rm=T) %>%
-  group_by(MRGID, lyr, category) %>%
-  summarize(
-    area_km2 = sum(area_km2)) %>%
-  mutate(
-    yj   = str_replace(lyr, 'lyr', ''),
-    date = as.Date(sprintf('%s-01-01', str_sub(yj,1,4))) + days(as.integer(str_sub(yj,5,8))-1)) %>%
-  ungroup() %>%
-  mutate(category = as.integer(category)) %>%
-  arrange(date, MRGID, category) %>%
-  select(date, MRGID, category, area_km2)
 
+# paths
+eez_shp      = file.path(dir_root, 'technical/boundaries/eez/eez.shp')
+dir_data     = file.path(dir_root, 'satellite/sst4/anom_27km')
+dir_ref      = file.path(dir_root, 'satellite/reference')
+cid_eez_csv  = file.path(dir_ref, 'gl_27km_cell-eez.csv')
+grd_cid      = file.path(dir_ref, 'gl_27km_cell.grd')
+grd_km2      = file.path(dir_ref, 'gl_27km_cell_km2.grd')
+grd_pattern = '.*\\_27km.grd$'
+grd_layer   = 'mean'
+  
+# fetch grd for reference
+grd_files = list.files(dir_data, grd_pattern, full.names=T)
+grd1 = grd_files[1]
 
+# read raster from grid
+r1 = raster(grd1, layer=grd_layer)
+
+# get cellid
+r_cid = setValues(r1, values=as.integer(1:ncell(r1)))
+names(r_cid) = 'cellid'
+
+# get area
+r_km2 = area(r_cid)
+names(r_km2) = 'area_km2'
+
+# fetch eez
+eez_sf = read_sf(eez_shp) %>%
+  mutate(
+    MRGID = as.integer(MRGID)) %>%
+  filter(
+    Pol_type == '200NM')
+
+# fasterize
+eez_r = fasterize(eez_sf, r_cid, field='MRGID', fun='first') # plot(eez_r)
+names(eez_r) = 'eez_mrgid'
+
+# find missing eez too small to be picked up by fasterize
+eez_miss_pts = eez_sf %>% 
+  select(MRGID, Territory1) %>%
+  filter(
+    !MRGID %in% unique(eez_r)) %>%
+  mutate(
+    geom_centroid = st_centroid(geometry)) %>%
+  st_set_geometry('geom_centroid') %>%
+  as('Spatial')
+
+eez_miss_d = tibble(
+  eez_mrgid = eez_miss$MRGID,
+  cellid    = extract(raster(s, 'cellid'), eez_miss_pts))
+
+# extract cellids from rasters
+d  = getValues(stack(eez_r, r_cid)) %>%
+  as_tibble() %>%
+  filter(!is.na(eez_mrgid)) %>%
+  bind_rows(
+    eez_miss_d)
+
+# write cid_eez_csv
+write_csv(d, cid_eez_csv)
+
+# write grds
+writeRaster(r_cid, grd_cid, overwrite=T)
+writeRaster(r_km2, grd_km2, overwrite=T)
 ```
+
+```{r extract sst4 to eez faster}
+library(tidyverse)
+library(sf)
+library(fasterize) # devtools::install_github("ecohealthalliance/fasterize")
+library(lubridate)
+select = dplyr::select
+
+# paths
+eez_shp      = file.path(dir_root, 'technical/boundaries/eez/eez.shp')
+dir_data     = file.path(dir_root, 'satellite/sst4/anom_27km')
+cid_eez_csv  = file.path(dir_root, 'satellite/reference/gl_27km_cell-eez.csv')
+grd_cid      = file.path(dir_root, 'satellite/reference/gl_27km_cell.grd')
+grd_km2      = file.path(dir_root, 'satellite/reference/gl_27km_cell_km2.grd')
+grd_clim     = file.path(dir_root, 'satellite/sst4/clim_27km/A20032016_sst4_CLIM_MO_GLOB_27km.grd')
+
+grd_pattern = '.*\\_27km.grd$'
+grd_layer   = 'mean'
+  
+# read in reference
+d_cid_eez = read_csv(cid_eez_csv)
+r_cid     = raster(grd_cid)
+r_km2     = raster(grd_km2)
+
+# fetch eez
+d_eez = read_sf(eez_shp) %>%
+  filter(
+    Pol_type == '200NM') %>%
+  select(
+    eez_mrgid     = MRGID,
+    eez_territory = Territory1) %>%
+  st_set_geometry(NULL)
+
+# sst4
+grd_files = c(
+  list.files(dir_data, grd_pattern, full.names=T),
+  grd_clim)
+for (grd in grd_files){ # grd = grd_files[1] # grd = grd_clim
+  
+  # csv out
+  eez_csv = sprintf('%s_eez.csv', tools::file_path_sans_ext(grd))
+  
+  is_clim = ifelse(str_detect(nc_path, 'clim'), T)
+  if (is_clim){
+    
+    s = stack(grd)
+    
+    # rename layers to dates, using mid-month day of 15th
+    yr = round(mean(c(2003, 2016)))
+    dates = as.Date(plyr::mapvalues(
+      names(s),
+      sprintf('%s_sst4_clim', month.name),
+      sprintf('%s-%02d-15', yr, 1:12)))
+    names(s) = format(dates, 'ymd_%Y.%m.%d')
+    
+    # stack and extract
+    d = getValues(stack(r_cid, r_km2, s)) %>%
+      as_tibble() %>%
+      gather(ymd_mid, mean, -cellid, -area_km2) %>%
+      filter(!is.na(mean)) %>%
+      mutate(
+        date_mid = as_date(ymd_mid, format='ymd_%Y.%m.%d')) %>%
+      left_join(
+        d_cid_eez, by='cellid') %>%
+      left_join(
+        d_eez, by='eez_mrgid') %>%
+      filter(!is.na(eez_territory)) %>%
+      group_by(eez_mrgid, eez_territory, date_mid) %>%
+      summarize(
+        sst_mean = mean(mean),
+        sst_sd   = sd(mean)) # View(d)
+    
+  } else {
+    
+    # get mid-month date
+    yj = str_sub(basename(grd), 2, 8)
+    date_mid = as.Date(sprintf('%s-01-01', str_sub(yj,1,4))) + days(as.integer(str_sub(yj,5,8))-1 + 14)
+    
+    r_lyr = raster(grd, layer=grd_layer)
+    
+    # stack and extract
+    d = getValues(stack(r_lyr, r_cid, r_km2)) %>%
+      as_tibble() %>%
+      filter(!is.na(mean)) %>%
+      left_join(
+        d_cid_eez, by='cellid') %>%
+      left_join(
+        d_eez, by='eez_mrgid') %>%
+      filter(!is.na(eez_territory)) %>%
+      group_by(eez_mrgid, eez_territory) %>%
+      summarize(
+        sst_mean = mean(mean),
+        sst_sd   = sd(mean)) %>%
+      mutate(
+        date_mid = date_mid) # View(d)
+  }
+
+  write_csv(d, eez_csv)
+}
+```
+
+```{r}
+library(leaflet)
+```
+
 
 
 ## Maps
@@ -499,5 +652,79 @@ diff(x[1,])[(nrow(x)-3):nrow(x)]
 dim(x)
 z = m$CLASS
 dim(z)
+```
+
+## Tiling
+
+```{r tile prep}
+library(tidyverse)
+library(raster)
+library(rgdal)
+library(leaflet)
+library(RColorBrewer)
+
+grd = '/Volumes/Best HD/mbon_data_big/satellite/chlor_a/clim_27km/A20032007_chlor_a_CLIM_MO_GLOB_27km.grd'
+
+#grd = '/mbon/data_big/satellite/chlor_a/clim_27km/A20032007_chlor_a_CLIM_MO_GLOB_27km.grd'
+
+tif = sprintf('%s.tif', tools::file_path_sans_ext(grd))
+png = sprintf('%s.png', tools::file_path_sans_ext(grd))
+
+#plot(r)
+c(minValue(r), maxValue(r))
+cellStats(is.na(r), sum)
+
+display.brewer.pal(5, 'Greens')
+
+
+# http://colorbrewer2.org/#type=sequential&scheme=Greens&n=9
+pal = colorRampPalette(c('#f7fcf5','#74c476','#00441b'))(255)
+
+na.color = "#808080", alpha = FALSE, 
+    reverse = FALSE) 
+{
+    rng = NULL
+    if (length(domain) > 0) {
+        rng = range(domain, na.rm = TRUE)
+        if (!all(is.finite(rng))) {
+            stop("Wasn't able to determine range of domain")
+        }
+    }
+  colorNumeric
+    pf = safePaletteFunc(palette, na.color, alpha)
+leaflet:::safePaletteFunc(
+  c('#f7fcf5','#74c476','#00441b'), 
+  na.color = "#808080", alpha=)
+  , )
+rev(terrain.colors(255))
+
+#plot(r_rgb[[1]])
+plotRGB(r_rgb)
+v_r  = seq(minValue(r), maxValue(r), length.out = 257)
+#r = cut(r, v_r, labels=0:255, include.lowest=T) # [0, 255]
+r = cut(r, v_r, include.lowest=T, right=T) - 1 # [0, 255]
+c(minValue(r), maxValue(r))
+cellStats(is.na(r), sum)
+r
+
+pal = colorNumeric('Greens', 0:255, na.color='transparent')
+colortable(r) = pal(0:255)
+
+raster::RGB()
+raster::plotRGB()
+plot(r)
+
+
+r = raster(grd)
+r = log(r)
+b_rgb = raster::RGB(
+  r, colNA='#808080', alpha=T,
+  col=colorRampPalette(brewer.pal(5, 'Greens'))(256))
+
+#writeRaster(b_rgb, tif, overwrite=T)
+writeRaster(b_rgb, png, overwrite=T)
+
+r_rgb = brick(tif)
+plotRGB(r_rgb)
 ```
 

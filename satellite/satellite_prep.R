@@ -15,30 +15,60 @@ library(raster)
 # install.packages(c('gdalUtils','leaflet'))
 library(gdalUtils)
 library(leaflet)
-
-# package options ----
-rasterOptions(tmpdir='/mbon-local/tmp-raster', tmptime=1) 
-# showTmpFiles(); removeTmpFiles()
+library(R.matlab)
+library(RCurl)
 
 # paths & vars ----
 if (basename(getwd()) != 'satellite') setwd('satellite')
 
 dir_root = switch(
   Sys.info()[['sysname']],
-  'Darwin'  = '/Volumes/Best HD/mbon_data_big', # BB's Mac
-  'Windows' = 'P:',                             # constance.bren.ucsb.edu
-  'Linux'   = '/mbon/data_big')                 # mbon.marine.usf.edu
-dir_wms = '/mbon-local/geoserver/satellite' # TODO: generalize for laptop
-sat_csv = 'satellite_products.csv'
-# TODO: gl_sea_[curr|clim]_09km_mo
+  'Darwin'  = '/Volumes/Best HD/mbon_data_big',  # BB's Mac
+  'Linux'   = '/mbon/data_big')                  # mbon.marine.usf.edu
+dir_wms = switch(
+  Sys.info()[['sysname']],
+  'Darwin'  = '/Volumes/Best HD/mbon_data_big/geoserver/satellite',  # BB's Mac
+  'Linux'   = '/mbon-local/geoserver/satellite') # mbon.marine.usf.edu
+dir_tmp = switch(
+  Sys.info()[['sysname']],
+  'Darwin'  = '/Users/bbest/Data/tmp-raster',  # BB's Mac
+  'Linux'   = '/mbon-local/tmp-raster')        # mbon.marine.usf.edu
+
+sat_csv = 'data_small/satellite_products.csv'
+
+rasterOptions(tmpdir=dir_tmp, tmptime=2) # showTmpFiles(); removeTmpFiles()
+
+db = switch(
+  Sys.info()[['sysname']],
+  'Linux' = list(
+    host = read_delim('/etc/hosts', '\t', col_names=c('ip','host')) %>%
+      separate(host, c('name','image'), extra='merge', fill='left') %>%
+      filter(name=='postgis') %>%
+      .$ip,
+    port = 5432,
+    user = 'docker',
+    pass = readLines('/mbon/.pgsql_pass_docker'),
+    name = 'docker'),
+  'Darwin' = list(
+    host = '172.17.0.2',
+    port = 5432,
+    user = 'docker',
+    pass = readLines('/mbon/.pgsql_pass_docker'),
+    name = 'docker'))
+db$dsn=sprintf(
+  "PG:dbname=%s host=%s port=%s user=%s password=%s", 
+  db$name, db$host, db$port, db$user, db$pass)
+
+# TODO: gl_[sst|chl|sea]_clim_09km_mo
 
 # helper functions ----
 
 f2date = function(f, p){
   
-  # TODO: clim
-  
-  yj       = str_sub(basename(f), 2, 8)
+  yj = switch(
+    p[['content']] == 'seascape',
+    T = str_replace(basename(f), sprintf('.*_([0-9]+)\\.%s$', p[['f_ext']]), '\\1'),
+    F = str_sub(basename(f), 2, 8))
   date_mid = date(
     sprintf('%s-01-01', str_sub(yj,1,4))) +   #  1st of year
     days(as.integer(str_sub(yj,5,8))-1 + 14)  # 15th of month in julian days
@@ -46,10 +76,15 @@ f2date = function(f, p){
   date_mid
 }
 
-
-mat2raster = function(f){
-  # convert to raster
-  r = 'mat'
+mat2raster = function(f, p){
+  # convert mat to raster
+  m = readMat(f)
+  r = raster(m$CLASS) %>%
+    flip('y') %>% 
+    setExtent(extent(-180, 180, -90, 90))
+  crs(r) = leaflet:::epsg4326
+  # names(r) # plot(r)
+  
   r
 }
 
@@ -96,16 +131,16 @@ r2tif4gs = function(r, p, tif){
   # [Data Considerations — GeoServer 2.13.x User Manual](http://docs.geoserver.org/latest/en/user/production/data.html)
   
   # project to Mercator for consuming by leaflet
-  proj_method = ifelse(p[['is_clim']], 'ngb'    , 'bilinear')
-  tran_method = ifelse(p[['is_clim']], 'nearest', 'bilinear')
-  addo_method = ifelse(p[['is_clim']], 'nearest', 'average')
+  proj_method = ifelse(p[['is_categorical']], 'ngb'    , 'bilinear')
+  tran_method = ifelse(p[['is_categorical']], 'nearest', 'bilinear')
+  addo_method = ifelse(p[['is_categorical']], 'nearest', 'average')
   
   # r0 = r # r = r0
   r = projectRaster(r, res=p[['res_km']]*1000, crs=leaflet:::epsg3857, method=proj_method)
-  # TODO: Warning message: 106 projected point(s) not finite
+  # TODO: gl_sst_curr_09km_mo -- Warning message: 106 projected point(s) not finite
   
-  tif_tmp1 = tempfile(fileext = '.tif')  # tif_tmp1 = tif_tmp; rm(tif_tmp)
-  tif_tmp2 = tempfile(fileext = '.tif')  # tif_tmp1 = tif_tmp; rm(tif_tmp)
+  tif_tmp1 = tempfile(tmpdir=dir_tmp, fileext = '.tif')  # tif_tmp1 = tif_tmp; rm(tif_tmp)
+  tif_tmp2 = tempfile(tmpdir=dir_tmp, fileext = '.tif')  # tif_tmp1 = tif_tmp; rm(tif_tmp)
   writeRaster(r, tif_tmp1, options=c('COMPRESS=NONE'), overwrite=T) # file.exists(tif_tmp1); file.size(tif_tmp1)/(1000*1000) # MB
   
   # add inner tiles
@@ -119,11 +154,131 @@ r2tif4gs = function(r, p, tif){
   file.remove(tif_tmp2)
 }
 
+fetch_seascapes = function(){
+
+  # csv
+  csv_whoi  = 'data_small/seascapes_whoi_ftp.csv'
+  
+  # ftp params
+  url_pre   = 'ftp://ftp.whoi.edu'
+  url_paths = list(
+    gl_curr  = 'MBON/GLOBAL/BETA/SDG14/seascape/MODIS_3VAR_MO9k/')
+    #fl       = 'MBON/GOM_FK/SMALL_MO/',
+    #mb       = 'MBON/ENPAC_MB/SMALL_MO/')
+  passwd    = read_lines(file.path(dir_root, 'satellite/.mkavanaugh_passwd_ftp_whoi_mbon'))
+  usrpwd    = sprintf('mkavanaugh:%s', passwd)
+  
+  # dir params
+  dir_seascapes = file.path(dir_root, 'satellite/seascapes')
+  sapply(
+    sprintf('%s/%s', dir_seascapes, names(url_paths)), 
+    function(x) dir.create(x, recursive=T, showWarnings=F))
+  
+  # get ftp connection
+  con = getCurlHandle(ftp.use.epsv=F, userpwd=usrpwd)
+  
+  if (!file.exists(csv_whoi)){
+    
+    # get list of filenames
+    for (i in 1:length(names(url_paths))){ # i = 1
+      
+      # get file, url, local path for in ftp path
+      u_i = url_paths[i]
+      p_i = file.path(dir_seascapes, names(url_paths)[i])
+      d_i = tibble(
+        fname = getURL(
+          file.path(url_pre, u_i), curl=con, 
+          ftp.use.epsv=F, dirlistonly=T) %>% str_split('\n') %>% .[[1]]) %>%
+        filter(fname != '') %>%
+        mutate(
+          url  = file.path(url_pre, u_i, fname),
+          path = file.path(p_i, fname))
+      
+      if (i == 1){
+        d = d_i
+      } else {
+        d = bind_rows(d, d_i)
+      }
+      
+      # wait 5 seconds before next request, otherwise get 'Access denied: 530'
+      Sys.sleep(5)
+    }
+    
+    # write csv
+    write_csv(d, csv_whoi)
+  }
+  
+  # con = getCurlHandle(ftp.use.epsv=F, userpwd=usrpwd)
+  d = read_csv(csv_whoi) %>%
+    mutate(
+      path_exists = file.exists(path)) %>%
+    filter(
+      !path_exists,
+      str_detect(fname, '.*\\.mat$'))
+  
+  for (i in 1:nrow(d)){ # i = 1
+    #for (i in c(178:181,496:499)){
+    cat(sprintf('%03d (of %d): fetching %s \n', i, nrow(d), d$fname[i]))
+    content = getBinaryURL(d$url[i], curl=con)
+    writeBin(content, d$path[i])
+  }
+}
+#fetch_seascapes()
+
+write_gs_properties = function(p, dir_out){
+  
+  # datastore.properties
+  writeLines(
+    text = paste0(
+"SPI=org.geotools.data.postgis.PostgisNGDataStoreFactory
+host=",db$host,"
+port=5432
+database=mbon_gis
+schema=public
+user=docker
+passwd=",db$pass,"
+Loose\\ bbox=true
+Estimated\\ extends=false
+validate\\ connections=true
+Connection\\ timeout=10
+preparedStatements=true
+"),
+    con = file.path(dir_out, 'datastore.properties'))
+  
+  # indexer.properties
+  writeLines(
+    text = paste0(
+"TimeAttribute=ingestion
+Schema=*the_geom:Polygon,location:String,ingestion:java.util.Date
+PropertyCollectors=TimestampFileNameExtractorSPI[timeregex](ingestion)
+"),
+    con = file.path(dir_out, 'indexer.properties'))
+  
+  # timeregex.properties
+  writeLines(
+    text = paste0(
+"regex=[0-9]{8}
+"),
+    con = file.path(dir_out, 'indexer.properties'))
+  
+}
+
+# TODO: [Manage ImageMosaic content through REST API — GeoServer Training](http://geoserver.geo-solutions.it/edu/en/multidim/rest/index.html)
+# library(geosapi) # devtools::install_github("eblondel/geosapi")
+# gsman <- GSManager$new(
+#   url = 'http://mbon.marine.usf.edu:8080/geoserver', #baseUrl of the Geoserver
+#   user = 'admin', pwd = readLines('/mbon/.pgsql_pass_docker'), #credentials
+#   logger = NULL #logger, for info or debugging purpose
+# )
+# 
+# curl -v -u admin:M******#* -XGET "http://mbon.marine.usf.edu:8080/geoserver"
+# curl -v -u admin:M******#* -XGET "http://mbon.marine.usf.edu:8080/geoserver/rest/workspaces/satellite/coveragestores/sst4_anom_27km/sst_monthly_mean_27km/index.xml"
+
 # iterate over satellite products ----
 products = read_csv(sat_csv) %>%
   filter(do==T) # View(products)
 for (i in 1:nrow(products)){ # i = 1
-  
+
   p       = products[i,]
   dir_in  = file.path(dir_root, p[['dir']])
   dir_out = file.path(dir_wms, p[['key']])
@@ -137,14 +292,14 @@ for (i in 1:nrow(products)){ # i = 1
   
   # iterate over files ----
   t0 = Sys.time(); n_done = 0
-  for (j in seq_along(files)){ # j = 1
+  for (j in seq_along(files)){ # j = 1 # j=2
     
     # f vars
     f = files[j]
     tif = sprintf('%s/r_%s.tif', dir_out, f2date(f, p) %>% format('%Y%m%d'))
     
     # TODO: multiply for clim
-    if (!file.exists(tif) | p[['redo']]){
+    if (!file.exists(tif) | p[['redo_gstif']]){
     
       # report
       t1 = Sys.time()
@@ -158,7 +313,6 @@ for (i in 1:nrow(products)){ # i = 1
         j, length(files), basename(f), basename(tif), 
         format(t1, tz='America/Los_Angeles',usetz=TRUE), t_min_left))
       
-      
       # file (nc|mat) to raster
       r = f2raster(f, p)
       
@@ -166,11 +320,14 @@ for (i in 1:nrow(products)){ # i = 1
       r2tif4gs(r, p, tif)
       
       n_done = n_done + 1
-    } # end: if (!file.exists(tif) | p[['redo']])
+    } # end: if (!file.exists(tif) | p[['redo_gstif']])
     
   } # end: for (f in files)
-} # end: for (i in 1:length(products))
   
+  # write geoserver property files
+  write_gs_properties(p, dir_out)
+  
+} # end: for (i in 1:length(products))
 
 # TODO: create dir_out parameter files for GeoServer
 # * [Using the ImageMosaic plugin for raster time-series data — GeoServer 2.12.x User Manual](http://docs.geoserver.org/stable/en/user/tutorials/imagemosaic_timeseries/imagemosaic_timeseries.html)
