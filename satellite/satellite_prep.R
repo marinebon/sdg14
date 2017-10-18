@@ -12,30 +12,40 @@ library(lubridate)
 library(rgdal)
 library(ncdf4)
 library(raster)
+library(sf)
 # install.packages(c('gdalUtils','leaflet'))
 library(gdalUtils)
 library(leaflet)
 library(R.matlab)
 library(RCurl)
+library(fasterize) # devtools::install_github('ecohealthalliance/fasterize')
+select    = dplyr::select
+summarise = dplyr::summarise
+summarize = dplyr::summarize
 
 # paths & vars ----
 if (basename(getwd()) != 'satellite') setwd('satellite')
 
-dir_root = switch(
+dir_data_big = switch(
   Sys.info()[['sysname']],
   'Darwin'  = '/Volumes/Best HD/mbon_data_big',  # BB's Mac
   'Linux'   = '/mbon/data_big')                  # mbon.marine.usf.edu
-dir_tif_pfx = switch(
+dir_local = switch(
   Sys.info()[['sysname']],
-  'Darwin'  = '/Volumes/Best HD/mbon_data_big/geoserver/satellite',  # BB's Mac
-  'Linux'   = '/mbon-local/geoserver/satellite') # mbon.marine.usf.edu
-dir_tmp = switch(
-  Sys.info()[['sysname']],
-  'Darwin'  = '/Users/bbest/Data/tmp-raster',  # BB's Mac
-  'Linux'   = '/mbon-local/tmp-raster')        # mbon.marine.usf.edu
+  'Darwin'  = '/Volumes/Best HD/mbon_data_big/local',  # BB's Mac
+  'Linux'   = '/mbon-local') # mbon.marine.usf.edu
+dir_tmp    = file.path(dir_local, 'tmp-raster')
+dir_gs_sat = file.path(dir_local, 'geoserver/satellite')
+sat_csv    = 'data_small/satellite_products.csv'
 
-sat_csv = 'data_small/satellite_products.csv'
+dir_extract  = file.path(dir_local, 'raster-extract')
+dir_ref      = file.path(dir_local, 'raster-extract/reference')
+ref_tif      = file.path(dir_gs_sat, 'gl_chl_curr_09km_mo/r_20020915.tif')
+cid_grd      = file.path(dir_ref, 'gl_09km_cell.grd')
+eez_shp      = file.path(dir_data_big, 'technical/boundaries/eez/eez.shp')
+cid_eez_csv  = file.path(dir_ref, 'gl_09km_cell-eez.csv')
 
+# raster temp dir important!
 rasterOptions(tmpdir=dir_tmp, tmptime=2) # showTmpFiles(); removeTmpFiles()
 
 db = switch(
@@ -60,6 +70,36 @@ db$dsn=sprintf(
   db$name, db$host, db$port, db$user, db$pass)
 
 # TODO: gl_[sst|chl|sea]_clim_09km_mo
+
+# read in reference cellid raster and eez data
+do_eez_extraction = T
+if (do_eez_extraction){
+  # raster
+  d_cid_eez = read_csv(cid_eez_csv)
+  s_cid_km2 = stack(cid_grd)
+  
+  # eez shp df
+  d_eez = read_sf(eez_shp) %>%
+    filter(
+      Pol_type == '200NM') %>%
+    select(
+      eez_mrgid     = MRGID,
+      eez_territory = Territory1) %>%
+    st_set_geometry(NULL)
+  
+  # eez area from raster
+  d_eez_km2 = d_eez %>%
+    left_join(
+      getValues(s_cid_km2) %>%
+        as_tibble() %>%
+        inner_join(
+          d_cid_eez, by='cellid'),
+      by='eez_mrgid') %>%
+    group_by(eez_territory, eez_mrgid) %>%
+    summarise(
+      eez_area_km2 = sum(area_km2)) %>%
+    ungroup()
+}
 
 # helper functions ----
 
@@ -139,7 +179,7 @@ r2tif = function(r, tif, p){
   
   if (p[['content']] == 'chl')
     r = log(r)
-    
+  
   writeRaster(r, tif, options=c('COMPRESS=NONE','TILED=YES'), overwrite=T)
   
   system2('gdaladdo', c(
@@ -152,7 +192,7 @@ create_sld = function(p, dir_tif){
   sld = file.path(dir_tif, sprintf('%s_style.sld', p[['content']]))
   
   cat(sprintf('  writing style: %s\n', sld))
-  # tifs = list.files(file.path(dir_tif_pfx, 'gl_chl_curr_09km_mo'), '\\.tif$', full.names=T)[1:137]
+  # tifs = list.files(file.path(dir_gs_sat, 'gl_chl_curr_09km_mo'), '\\.tif$', full.names=T)[1:137]
   # r1 = raster(tifs[1])
   # for (i in seq_along(tifs)){
   #   tif = tifs[i]
@@ -190,7 +230,7 @@ create_sld = function(p, dir_tif){
   #v = var_colors[[]]
   #var = 'seascape'
   v = var_colors[[var]]
-
+  
   pal256 = colorRampPalette(RColorBrewer::brewer.pal(9, v$colors))(256)
   round(seq.int(v$min, v$max, length.out=v$n))
   
@@ -199,8 +239,8 @@ create_sld = function(p, dir_tif){
   vals = round(seq.int(v$min, v$max, length.out=v$n), 1)
   
   xml = paste0(
-  '<?xml version="1.0" encoding="ISO-8859-1"?>
-  <StyledLayerDescriptor version="1.0.0" xmlns="http://www.opengis.net/sld" xmlns:ogc="http://www.opengis.net/ogc"
+    '<?xml version="1.0" encoding="ISO-8859-1"?>
+    <StyledLayerDescriptor version="1.0.0" xmlns="http://www.opengis.net/sld" xmlns:ogc="http://www.opengis.net/ogc"
     xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
     xsi:schemaLocation="http://www.opengis.net/sld http://schemas.opengis.net/sld/1.0.0/StyledLayerDescriptor.xsd">
     <NamedLayer>
@@ -215,7 +255,7 @@ create_sld = function(p, dir_tif){
     <Opacity>0.8</Opacity>
     <ColorMap type="', v$type, '">
     <ColorMapEntry color="#000000" quantity="-9999" label="nodata" opacity="0.0"/>
-', paste(sprintf('<ColorMapEntry color="%s" quantity="%g" label="%g"/>',cols, vals, vals), collapse='\n'),'
+    ', paste(sprintf('<ColorMapEntry color="%s" quantity="%g" label="%g"/>',cols, vals, vals), collapse='\n'),'
     </ColorMap>
     </RasterSymbolizer>
     </Rule>
@@ -223,13 +263,13 @@ create_sld = function(p, dir_tif){
     </UserStyle>
     </NamedLayer>
     </StyledLayerDescriptor>
-  ')
+    ')
   
   writeLines(text=xml, con=sld)
 }
 
 fetch_seascapes = function(){
-
+  
   # csv
   csv_whoi  = 'data_small/seascapes_whoi_ftp.csv'
   
@@ -237,13 +277,13 @@ fetch_seascapes = function(){
   url_pre   = 'ftp://ftp.whoi.edu'
   url_paths = list(
     gl_curr  = 'MBON/GLOBAL/BETA/SDG14/seascape/MODIS_3VAR_MO9k/')
-    #fl       = 'MBON/GOM_FK/SMALL_MO/',
-    #mb       = 'MBON/ENPAC_MB/SMALL_MO/')
-  passwd    = read_lines(file.path(dir_root, 'satellite/.mkavanaugh_passwd_ftp_whoi_mbon'))
+  #fl       = 'MBON/GOM_FK/SMALL_MO/',
+  #mb       = 'MBON/ENPAC_MB/SMALL_MO/')
+  passwd    = read_lines(file.path(dir_data_big, 'satellite/.mkavanaugh_passwd_ftp_whoi_mbon'))
   usrpwd    = sprintf('mkavanaugh:%s', passwd)
   
   # dir params
-  dir_seascapes = file.path(dir_root, 'satellite/seascapes')
+  dir_seascapes = file.path(dir_data_big, 'satellite/seascapes')
   sapply(
     sprintf('%s/%s', dir_seascapes, names(url_paths)), 
     function(x) dir.create(x, recursive=T, showWarnings=F))
@@ -252,34 +292,34 @@ fetch_seascapes = function(){
   con = getCurlHandle(ftp.use.epsv=F, userpwd=usrpwd)
   
   #if (!file.exists(csv_whoi)){
+  
+  # get list of filenames
+  for (i in 1:length(names(url_paths))){ # i = 1
     
-    # get list of filenames
-    for (i in 1:length(names(url_paths))){ # i = 1
-      
-      # get file, url, local path for in ftp path
-      u_i = url_paths[i]
-      p_i = file.path(dir_seascapes, names(url_paths)[i])
-      d_i = tibble(
-        fname = getURL(
-          file.path(url_pre, u_i), curl=con, 
-          ftp.use.epsv=F, dirlistonly=T) %>% str_split('\n') %>% .[[1]]) %>%
-        filter(fname != '') %>%
-        mutate(
-          url  = sprintf('%s/%s%s', url_pre, u_i, fname),
-          path = file.path(p_i, fname))
-      
-      if (i == 1){
-        d = d_i
-      } else {
-        d = bind_rows(d, d_i)
-      }
-      
-      # wait 5 seconds before next request, otherwise get 'Access denied: 530'
-      #Sys.sleep(5)
+    # get file, url, local path for in ftp path
+    u_i = url_paths[i]
+    p_i = file.path(dir_seascapes, names(url_paths)[i])
+    d_i = tibble(
+      fname = getURL(
+        file.path(url_pre, u_i), curl=con, 
+        ftp.use.epsv=F, dirlistonly=T) %>% str_split('\n') %>% .[[1]]) %>%
+      filter(fname != '') %>%
+      mutate(
+        url  = sprintf('%s/%s%s', url_pre, u_i, fname),
+        path = file.path(p_i, fname))
+    
+    if (i == 1){
+      d = d_i
+    } else {
+      d = bind_rows(d, d_i)
     }
     
-    # write csv
-    write_csv(d, csv_whoi)
+    # wait 5 seconds before next request, otherwise get 'Access denied: 530'
+    #Sys.sleep(5)
+  }
+  
+  # write csv
+  write_csv(d, csv_whoi)
   #}
   
   con = getCurlHandle(ftp.use.epsv=F, userpwd=usrpwd) # Access denied: 530
@@ -309,38 +349,155 @@ write_gs_properties = function(p, dir_tif){
   # datastore.properties
   writeLines(
     text = paste0(
-"SPI=org.geotools.data.postgis.PostgisNGDataStoreFactory
-host=",db$host,"
-port=5432
-database=mbon_gis
-schema=public
-user=docker
-passwd=",db$pass,"
-Loose\\ bbox=true
-Estimated\\ extends=false
-validate\\ connections=true
-Connection\\ timeout=10
-preparedStatements=true
-"),
+      "SPI=org.geotools.data.postgis.PostgisNGDataStoreFactory
+      host=",db$host,"
+      port=5432
+      database=mbon_gis
+      schema=public
+      user=docker
+      passwd=",db$pass,"
+      Loose\\ bbox=true
+      Estimated\\ extends=false
+      validate\\ connections=true
+      Connection\\ timeout=10
+      preparedStatements=true
+      "),
     con = file.path(dir_tif, 'datastore.properties'))
   
   # indexer.properties
   writeLines(
     text = paste0(
-"TimeAttribute=ingestion
-ElevationAttribute=elevation
-Schema=*the_geom:Polygon,location:String,ingestion:java.util.Date,elevation:Integer
-PropertyCollectors=TimestampFileNameExtractorSPI[timeregex](ingestion)
-"),
+      "TimeAttribute=ingestion
+      ElevationAttribute=elevation
+      Schema=*the_geom:Polygon,location:String,ingestion:java.util.Date,elevation:Integer
+      PropertyCollectors=TimestampFileNameExtractorSPI[timeregex](ingestion)
+      "),
     con = file.path(dir_tif, 'indexer.properties'))
   
   # timeregex.properties
   writeLines(
     text = paste0(
-"regex=[0-9]{8}
-"),
+      "regex=[0-9]{8}
+      "),
     con = file.path(dir_tif, 'timeregex.properties'))
   
+}
+
+create_cid_grd = function(ref_tif, cid_grd){
+  r_ref = raster(ref_tif)
+  
+  # get cellid
+  r_cid = setValues(r_ref, values=as.integer(1:ncell(r_ref)))
+  names(r_cid) = 'cellid'
+  
+  # get area
+  r_km2 = area(r_cid)
+  names(r_km2) = 'area_km2'
+  
+  # write stack
+  stack(r_cid, r_km2) %>%
+    writeRaster(cid_grd)
+}
+
+if (!file.exists(cid_grd)){
+  create_ref_tif(ref_tif, eez_shp, cid_grd, cid_eez_csv)
+}
+
+create_cid_eez_csv = function(cid_grd, eez_shp, cid_eez_csv){
+  
+  # get reference cellid stack
+  r_cid = raster(cid_grd, layer='cellid')
+  
+  # fetch eez
+  eez_sf = read_sf(eez_shp) %>%
+    mutate(
+      MRGID = as.integer(MRGID)) %>%
+    filter(
+      Pol_type == '200NM')
+  
+  # fasterize
+  eez_r = fasterize(eez_sf, r_cid, field='MRGID', fun='first') # plot(eez_r)
+  names(eez_r) = 'eez_mrgid'
+  
+  # find missing eez too small to be picked up by fasterize
+  eez_miss_pts = eez_sf %>% 
+    select(MRGID, Territory1) %>%
+    filter(
+      !MRGID %in% unique(eez_r)) %>%
+    mutate(
+      geom_centroid = st_centroid(geometry)) %>%
+    st_set_geometry('geom_centroid') %>%
+    as('Spatial')
+  
+  eez_miss_d = tibble(
+    eez_mrgid = eez_miss_pts$MRGID,
+    cellid    = extract(r_cid, eez_miss_pts))
+  
+  # extract cellids from rasters
+  d  = getValues(stack(eez_r, r_cid)) %>%
+    as_tibble() %>%
+    filter(!is.na(eez_mrgid)) %>%
+    bind_rows(
+      eez_miss_d)
+  
+  # write cid_eez_csv
+  write_csv(d, cid_eez_csv)
+  
+}
+
+if (!file.exists(cid_eez_csv)){
+  create_cid_eez_csv(cid_grd, eez_shp, cid_eez_csv)
+}
+
+r2eez_csv = function(i){ # i=1
+  # assumes s, p, etc loaded
+  
+  lyr = names(s)[i]
+  
+  # time reporting
+  if (i == 1){
+    t1 <<- Sys.time()
+    cat(sprintf('%03d of %d: %s\n', i, nlayers(s), lyr))
+  } else {
+    ti = Sys.time()
+    min_ea = as.numeric((difftime(ti, t1, units='min')) / (i-1))
+    t_min_togo =  min_ea * (nlayers(s) - i + 1)
+    cat(sprintf('%03d of %d: %s [%s, %1.1f min to go]\n', 
+                i, nlayers(s), lyr,
+                format(ti, tz='America/Los_Angeles',usetz=TRUE), t_min_togo))
+  }
+  
+  # stack with cellid, area_km2
+  s_r = stack(s_cid_km2, raster(s, lyr))
+  
+  # calculate mean, sd, area by eez per raster
+  d = getValues(s_r) %>%
+    as_tibble() %>%
+    gather(raster, value, -cellid, -area_km2) %>%
+    left_join(
+      d_cid_eez, by='cellid') %>%
+    filter(!is.na(eez_mrgid))
+  
+  if (p[['is_categorical']]){
+    # include area NA as another class of interest
+    d = d %>%
+      group_by(raster, eez_mrgid, value) %>%
+      summarise(
+        area_km2 = sum(area_km2)) %>%
+      ungroup()
+    
+  } else {
+    d = d %>%
+      filter(!is.na(value)) %>% # exclude NA
+      group_by(raster, eez_mrgid) %>%
+      summarize(
+        mean     = weighted.mean(value, area_km2),
+        sd       = sd(value),
+        area_km2 = sum(area_km2)) %>%
+      ungroup()
+  }
+  
+  d
 }
 
 # TODO: [Manage ImageMosaic content through REST API — GeoServer Training](http://geoserver.geo-solutions.it/edu/en/multidim/rest/index.html)
@@ -355,16 +512,14 @@ PropertyCollectors=TimestampFileNameExtractorSPI[timeregex](ingestion)
 # curl -v -u admin:M******#* -XGET "http://mbon.marine.usf.edu:8080/geoserver/rest/workspaces/satellite/coveragestores/sst4_anom_27km/sst_monthly_mean_27km/index.xml"
 
 # iterate over satellite products ----
-Sys.sleep(60*30)
-
 products = read_csv(sat_csv) %>%
   filter(do==T) # View(products)
-for (i in 1:nrow(products)){ # i = 1
-
-  p        = products[i,]
-  dir_in   = file.path(dir_root   , p[['dir']])
-  dir_tif   = file.path(dir_tif_pfx , p[['key']])
-
+for (i in 1:nrow(products)){ # i = 3
+  
+  p       = products[i,]
+  dir_in  = file.path(dir_data_big, p[['dir']])
+  dir_tif = file.path(dir_gs_sat  , p[['key']])
+  
   if (!dir.exists(dir_tif))
     dir.create(dir_tif)
   
@@ -382,10 +537,10 @@ for (i in 1:nrow(products)){ # i = 1
     # f vars
     f = files[j]
     tif = sprintf('%s/r_%s.tif', dir_tif, f2date(f, p) %>% format('%Y%m%d'))
-
+    
     # TODO: multiply for clim
     if (!file.exists(tif) | p[['redo_tif']]){
-    
+      
       # report
       t1 = Sys.time()
       if (n_done > 0 ){
@@ -407,11 +562,33 @@ for (i in 1:nrow(products)){ # i = 1
       
       # raster to tif, unprojected geographic
       r2tif(r, tif, p)
-    
+      
       n_done = n_done + 1  
     } # end: if (!file.exists(tif) | p[['redo_tif']])
     
   } # end: for (f in files)
+  
+  
+  # extract eez ----
+  eez_csv = sprintf('%s/eez_%s.csv', dir_extract, p[['key']])
+  if (!file.exists(eez_csv) | p[['redo_eez']]){
+    
+    # get full stack of rasters in dir_tif
+    s = stack(list.files(dir_tif, '.*\\.tif', full.names=T)) # names(s)
+    
+    # too big to gather, so map summary into combined df
+    d = map_df(seq_along(names(s)), r2eez_csv) # ~20 min for nlayers(s)=181 gl_sst_curr_09km_mo
+    
+    # join eez names and sort, calculate pct area of total eez
+    d = d_eez_km2 %>%
+      left_join(
+        d, by='eez_mrgid') %>%
+      mutate(
+        pct_eez = area_km2 / eez_area_km2) %>%
+      arrange(eez_territory, raster)
+    
+    write_csv(d, eez_csv)
+  }
   
   # write geoserver property files
   write_gs_properties(p, dir_tif)

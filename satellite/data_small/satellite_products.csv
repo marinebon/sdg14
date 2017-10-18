@@ -1,8 +1,8 @@
-key,do,redo_tif,area,content,is_clim,is_categorical,res_km,step,dir,f_ext,f_var
-gl_sst_curr_09km_mo,F,F,global,sst,F,F,9,month,satellite/sst4/anom_9km,nc,mean
-gl_sst_clim_09km_mo,F,F,global,sst,T,F,9,month,satellite/sst4/clim_9km,nc,mean
-gl_chl_curr_09km_mo,F,F,global,chl,F,F,9,month,satellite/chlor_a/anom_9km,nc,mean
-gl_chl_clim_09km_mo,F,F,global,chl,T,F,9,month,satellite/chlor_a/clim_9km,nc,mean
-gl_sea_curr_09km_mo,T,T,global,seascape,F,T,9,month,satellite/seascapes/gl_curr,mat,NA
-gl_sst_curr_09km_mo_test3,F,F,global,sst,F,F,9,month,satellite/sst4/anom_9km,nc,mean
-gl_chl_curr_09km_mo_test3,F,T,global,chl,F,F,9,month,satellite/chlor_a/anom_9km,nc,mean
+key,do,redo_tif,redo_eez,area,content,is_clim,is_categorical,res_km,step,dir,f_ext,f_var
+gl_sst_curr_09km_mo,T,F,F,global,sst,F,F,9,month,satellite/sst4/anom_9km,nc,mean
+gl_sst_clim_09km_mo,F,F,F,global,sst,T,F,9,month,satellite/sst4/clim_9km,nc,mean
+gl_chl_curr_09km_mo,T,F,F,global,chl,F,F,9,month,satellite/chlor_a/anom_9km,nc,mean
+gl_chl_clim_09km_mo,F,F,F,global,chl,T,F,9,month,satellite/chlor_a/clim_9km,nc,mean
+gl_sea_curr_09km_mo,T,F,F,global,seascape,F,T,9,month,satellite/seascapes/gl_curr,mat,NA
+gl_sst_curr_09km_mo_test3,F,F,F,global,sst,F,F,9,month,satellite/sst4/anom_9km,nc,mean
+gl_chl_curr_09km_mo_test3,F,T,F,global,chl,F,F,9,month,satellite/chlor_a/anom_9km,nc,mean
