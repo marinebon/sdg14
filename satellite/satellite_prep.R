@@ -25,10 +25,14 @@ dir_root = switch(
   Sys.info()[['sysname']],
   'Darwin'  = '/Volumes/Best HD/mbon_data_big',  # BB's Mac
   'Linux'   = '/mbon/data_big')                  # mbon.marine.usf.edu
-dir_wms = switch(
+dir_gs_pfx = switch(
   Sys.info()[['sysname']],
   'Darwin'  = '/Volumes/Best HD/mbon_data_big/geoserver/satellite',  # BB's Mac
   'Linux'   = '/mbon-local/geoserver/satellite') # mbon.marine.usf.edu
+dir_4326_pfx = switch(
+  Sys.info()[['sysname']],
+  'Darwin'  = '/Volumes/Best HD/mbon_data_big/satellite_tif_epsg4326',  # BB's Mac
+  'Linux'   = '/mbon-local/satellite_tif_epsg4326')        # mbon.marine.usf.edu
 dir_tmp = switch(
   Sys.info()[['sysname']],
   'Darwin'  = '/Users/bbest/Data/tmp-raster',  # BB's Mac
@@ -66,9 +70,9 @@ db$dsn=sprintf(
 f2date = function(f, p){
   
   yj = switch(
-    p[['content']] == 'seascape',
-    T = str_replace(basename(f), sprintf('.*_([0-9]+)\\.%s$', p[['f_ext']]), '\\1'),
-    F = str_sub(basename(f), 2, 8))
+    as.character(p[['content']] == 'seascape'),
+    'TRUE'  = str_replace(basename(f), sprintf('.*_([0-9]+)\\.%s$', p[['f_ext']]), '\\1'),
+    'FALSE' = str_sub(basename(f), 2, 8))
   date_mid = date(
     sprintf('%s-01-01', str_sub(yj,1,4))) +   #  1st of year
     days(as.integer(str_sub(yj,5,8))-1 + 14)  # 15th of month in julian days
@@ -126,32 +130,34 @@ f2raster = function(f, p){ # f
   r
 }
 
-r2tif4gs = function(r, p, tif){
+r2tif = function(r, tif_4326){
+  writeRaster(r, tif_4326, options=c('COMPRESS=NONE','TILED=YES'), overwrite=T)
+}
+
+r2tif4gs = function(tif_4326, tif_gs, p){
   # optimize for Geoserver WMS
   # [Data Considerations — GeoServer 2.13.x User Manual](http://docs.geoserver.org/latest/en/user/production/data.html)
   
   # project to Mercator for consuming by leaflet
-  proj_method = ifelse(p[['is_categorical']], 'ngb'    , 'bilinear')
-  tran_method = ifelse(p[['is_categorical']], 'nearest', 'bilinear')
+  warp_method = ifelse(p[['is_categorical']], 'near'   , 'bilinear')
   addo_method = ifelse(p[['is_categorical']], 'nearest', 'average')
   
-  # r0 = r # r = r0
-  r = projectRaster(r, res=p[['res_km']]*1000, crs=leaflet:::epsg3857, method=proj_method)
-  # TODO: gl_sst_curr_09km_mo -- Warning message: 106 projected point(s) not finite
+  # raster::projectRaster() | gdalUtils::gdalwarp() didn't yield readable EPSG:3857 by GeoServer, so using system2 command
+  # plus gdal binaries (using system2) 5-10x faster
+  system2('gdalwarp', c(
+    '-s_srs EPSG:4326','-t_srs EPSG:3857', 
+    paste('-r', warp_method),
+    '-te -20037508.34 -20037508.34 20037508.34 20037508.34', # 85.05° N & S: https://tilemill-project.github.io/tilemill/docs/guides/reprojecting-geotiff/
+    '-co COMPRESS=NONE', 
+    '-co TILED=YES',
+    '-overwrite',
+    tif_4326, 
+    tif_gs), stdout=F)
   
-  tif_tmp1 = tempfile(tmpdir=dir_tmp, fileext = '.tif')  # tif_tmp1 = tif_tmp; rm(tif_tmp)
-  tif_tmp2 = tempfile(tmpdir=dir_tmp, fileext = '.tif')  # tif_tmp1 = tif_tmp; rm(tif_tmp)
-  writeRaster(r, tif_tmp1, options=c('COMPRESS=NONE'), overwrite=T) # file.exists(tif_tmp1); file.size(tif_tmp1)/(1000*1000) # MB
-  
-  # add inner tiles
-  gdal_translate(tif_tmp1, tif_tmp2, of = 'GTiff', co = 'TILED=YES', r=tran_method)
-  file.remove(tif_tmp1) # gdalinfo(tif)
-  
-  # add overviews
-  gdaladdo(tif_tmp2, levels=c(2,4,8,16), r=addo_method)
-  
-  file.copy(tif_tmp2, tif)
-  file.remove(tif_tmp2)
+  system2('gdaladdo', c(
+    paste('-r', addo_method),
+    tif_gs,
+    '2 4 8 16 32'), stdout=F)
 }
 
 fetch_seascapes = function(){
@@ -225,7 +231,10 @@ fetch_seascapes = function(){
 }
 #fetch_seascapes()
 
-write_gs_properties = function(p, dir_out){
+write_gs_properties = function(p, dir_gs){
+  cat('  writing GeoServer *.properties: datastore, indexer, timeregex\n')
+  
+  # Could not list layers for this store, an error occurred retrieving them: Failed to create reader from file:satellite/gl_sst_curr_09km_mo and hints null
   
   # datastore.properties
   writeLines(
@@ -243,23 +252,24 @@ validate\\ connections=true
 Connection\\ timeout=10
 preparedStatements=true
 "),
-    con = file.path(dir_out, 'datastore.properties'))
+    con = file.path(dir_gs, 'datastore.properties'))
   
   # indexer.properties
   writeLines(
     text = paste0(
 "TimeAttribute=ingestion
-Schema=*the_geom:Polygon,location:String,ingestion:java.util.Date
+ElevationAttribute=elevation
+Schema=*the_geom:Polygon,location:String,ingestion:java.util.Date,elevation:Integer
 PropertyCollectors=TimestampFileNameExtractorSPI[timeregex](ingestion)
 "),
-    con = file.path(dir_out, 'indexer.properties'))
+    con = file.path(dir_gs, 'indexer.properties'))
   
   # timeregex.properties
   writeLines(
     text = paste0(
 "regex=[0-9]{8}
 "),
-    con = file.path(dir_out, 'indexer.properties'))
+    con = file.path(dir_gs, 'timeregex.properties'))
   
 }
 
@@ -279,16 +289,22 @@ products = read_csv(sat_csv) %>%
   filter(do==T) # View(products)
 for (i in 1:nrow(products)){ # i = 1
 
-  p       = products[i,]
-  dir_in  = file.path(dir_root, p[['dir']])
-  dir_out = file.path(dir_wms, p[['key']])
+  p        = products[i,]
+  dir_in   = file.path(dir_root   , p[['dir']])
+  dir_gs   = file.path(dir_gs_pfx , p[['key']])
+  dir_4326 = file.path(dir_4326_pfx, p[['key']])
   
-  if (!dir.exists(dir_out))
-    dir.create(dir_out)
+  if (!dir.exists(dir_gs))
+    dir.create(dir_gs)
+  if (!dir.exists(dir_4326))
+    dir.create(dir_4326)
   
   files = list.files(dir_in, sprintf('.*\\.%s$', p[['f_ext']]) , full.names=T)
   
-  cat(sprintf('\n%d of %d: %s\n  paths:\n    %s ->\n    %s\n  files: %d *.%s\n', i, nrow(products), p[['key']], dir_in, dir_out, length(files), p[['f_ext']]))
+  if (p[['key']] == 'gl_sst_curr_09km_mo_test3')
+    files=files[1:3]
+  
+  cat(sprintf('\n%d of %d: %s\n  paths:\n    %s\n    ->%s\n    ->%s\n  files: %d *.%s\n', i, nrow(products), p[['key']], dir_in, dir_4326, dir_gs, length(files), p[['f_ext']]))
   
   # iterate over files ----
   t0 = Sys.time(); n_done = 0
@@ -296,36 +312,51 @@ for (i in 1:nrow(products)){ # i = 1
     
     # f vars
     f = files[j]
-    tif = sprintf('%s/r_%s.tif', dir_out, f2date(f, p) %>% format('%Y%m%d'))
+    f_tif = sprintf('r_%s.tif', f2date(f, p) %>% format('%Y%m%d'))
+    tif_4326 = file.path(dir_4326, f_tif)
+    tif_gs = file.path(dir_gs, f_tif)
     
     # TODO: multiply for clim
-    if (!file.exists(tif) | p[['redo_gstif']]){
+    if (!file.exists(tif_4326) | p[['redo_tif_4326']]){
     
       # report
       t1 = Sys.time()
       if (n_done > 0 ){
-        t_min_left = as.numeric((difftime(t1, t0, units='min') / n_done) * (length(files) - j))
+        t_min_left = as.numeric((difftime(t1, t0, units='min') / n_done) * (length(files) - j + 1))
       } else {
         t_min_left = -9999
       }
       cat(sprintf(
-        '  %03d of %d: %s -> %s [%s, %1.1f min to go]\n', 
-        j, length(files), basename(f), basename(tif), 
+        '  %03d of %d: %s -> 4326:%s [%s, %1.1f min to go]\n', 
+        j, length(files), basename(f), basename(tif_4326), 
         format(t1, tz='America/Los_Angeles',usetz=TRUE), t_min_left))
       
       # file (nc|mat) to raster
       r = f2raster(f, p)
       
-      # write raster, optimized for Geoserver WMS
-      r2tif4gs(r, p, tif)
+      # raster to tif, unprojected geographic
+      r2tif(r, tif_4326)
+    
       
-      n_done = n_done + 1
-    } # end: if (!file.exists(tif) | p[['redo_gstif']])
+    } # end: if (!file.exists(tif_4326) | p[['redo_tif_4326']])
+    
+    if (!file.exists(tif_gs) | p[['redo_tif_gs']]){
+      
+      cat(sprintf('                 -> 3857:%s\n', basename(tif_4326)))
+      
+      # write raster, projected to Mercator & optimized for Geoserver WMS
+      r2tif4gs(tif_4326, tif_gs, p)
+      
+      n_done = n_done + 1  
+    } # end: if (!file.exists(tif_gs) | p[['redo_tif_gs']])
     
   } # end: for (f in files)
   
   # write geoserver property files
-  write_gs_properties(p, dir_out)
+  write_gs_properties(p, dir_gs)
+  
+  # TODO: set permissions
+  # ben@mbon: cd /mnt/mbon-supplement/geoserver; sudo chgrp -R users satellite; sudo chmod 775 -R satellite
   
 } # end: for (i in 1:length(products))
 
