@@ -25,14 +25,10 @@ dir_root = switch(
   Sys.info()[['sysname']],
   'Darwin'  = '/Volumes/Best HD/mbon_data_big',  # BB's Mac
   'Linux'   = '/mbon/data_big')                  # mbon.marine.usf.edu
-dir_gs_pfx = switch(
+dir_tif_pfx = switch(
   Sys.info()[['sysname']],
   'Darwin'  = '/Volumes/Best HD/mbon_data_big/geoserver/satellite',  # BB's Mac
   'Linux'   = '/mbon-local/geoserver/satellite') # mbon.marine.usf.edu
-dir_4326_pfx = switch(
-  Sys.info()[['sysname']],
-  'Darwin'  = '/Volumes/Best HD/mbon_data_big/satellite_tif_epsg4326',  # BB's Mac
-  'Linux'   = '/mbon-local/satellite_tif_epsg4326')        # mbon.marine.usf.edu
 dir_tmp = switch(
   Sys.info()[['sysname']],
   'Darwin'  = '/Users/bbest/Data/tmp-raster',  # BB's Mac
@@ -82,12 +78,17 @@ f2date = function(f, p){
 
 mat2raster = function(f, p){
   # convert mat to raster
-  m = readMat(f)
-  r = raster(m$CLASS) %>%
-    flip('y') %>% 
-    setExtent(extent(-180, 180, -90, 90))
-  crs(r) = leaflet:::epsg4326
-  # names(r) # plot(r)
+  m = try(readMat(f))
+  
+  if (class(m) == 'try-error'){
+    r = NULL
+  } else {
+    r = raster(m$CLASS) %>%
+      flip('y') %>% 
+      setExtent(extent(-180, 180, -90, 90))
+    crs(r) = leaflet:::epsg4326
+    # names(r) # plot(r)
+  }
   
   r
 }
@@ -130,34 +131,101 @@ f2raster = function(f, p){ # f
   r
 }
 
-r2tif = function(r, tif_4326){
-  writeRaster(r, tif_4326, options=c('COMPRESS=NONE','TILED=YES'), overwrite=T)
-}
-
-r2tif4gs = function(tif_4326, tif_gs, p){
+r2tif = function(r, tif, p){
   # optimize for Geoserver WMS
   # [Data Considerations — GeoServer 2.13.x User Manual](http://docs.geoserver.org/latest/en/user/production/data.html)
   
-  # project to Mercator for consuming by leaflet
-  warp_method = ifelse(p[['is_categorical']], 'near'   , 'bilinear')
   addo_method = ifelse(p[['is_categorical']], 'nearest', 'average')
   
-  # raster::projectRaster() | gdalUtils::gdalwarp() didn't yield readable EPSG:3857 by GeoServer, so using system2 command
-  # plus gdal binaries (using system2) 5-10x faster
-  system2('gdalwarp', c(
-    '-s_srs EPSG:4326','-t_srs EPSG:3857', 
-    paste('-r', warp_method),
-    '-te -20037508.34 -20037508.34 20037508.34 20037508.34', # 85.05° N & S: https://tilemill-project.github.io/tilemill/docs/guides/reprojecting-geotiff/
-    '-co COMPRESS=NONE', 
-    '-co TILED=YES',
-    '-overwrite',
-    tif_4326, 
-    tif_gs), stdout=F)
+  if (p[['content']] == 'chl')
+    r = log(r)
+    
+  writeRaster(r, tif, options=c('COMPRESS=NONE','TILED=YES'), overwrite=T)
   
   system2('gdaladdo', c(
     paste('-r', addo_method),
-    tif_gs,
+    tif,
     '2 4 8 16 32'), stdout=F)
+}
+
+create_sld = function(p, dir_tif){
+  sld = file.path(dir_tif, sprintf('%s_style.sld', p[['content']]))
+  
+  cat(sprintf('  writing style: %s\n', sld))
+  # tifs = list.files(file.path(dir_tif_pfx, 'gl_chl_curr_09km_mo'), '\\.tif$', full.names=T)[1:137]
+  # r1 = raster(tifs[1])
+  # for (i in seq_along(tifs)){
+  #   tif = tifs[i]
+  #   cat(sprintf('%03d: %s\n', i, tif))
+  #   r2 = raster(tif)
+  #   compareRaster(r1, r2)
+  #   extent(r1)
+  #   extent(r2)
+  # }
+  # s = stack(tifs)
+  # log(max(maxValue(s)))
+  # log(min(minValue(s)))
+  
+  var = p[['content']]
+  
+  var_colors = list(
+    seascape = list(
+      type   = 'interval',
+      colors = 'Spectral',
+      min    = 1,
+      max    = 14,
+      n      = 14),
+    chl = list(
+      type   = 'ramp',
+      colors = 'Greens',
+      min    = -6.91,
+      max    = 4.61,
+      n      = 7),
+    sst = list(
+      type   = 'ramp',
+      colors = 'Reds',
+      min    = -4,
+      max    = 36,
+      n      = 7))
+  #v = var_colors[[]]
+  #var = 'seascape'
+  v = var_colors[[var]]
+
+  pal256 = colorRampPalette(RColorBrewer::brewer.pal(9, v$colors))(256)
+  round(seq.int(v$min, v$max, length.out=v$n))
+  
+  #cols = pal256[c(1,round(256/2),256)] # sst Reds: "#FFF5F0" "#FB6A4A" "#67000D"
+  cols = pal256[seq.int(1, 256, length.out=v$n)] # sst Reds: "#FFF5F0" "#FB6A4A" "#67000D"
+  vals = round(seq.int(v$min, v$max, length.out=v$n), 1)
+  
+  xml = paste0(
+  '<?xml version="1.0" encoding="ISO-8859-1"?>
+  <StyledLayerDescriptor version="1.0.0" xmlns="http://www.opengis.net/sld" xmlns:ogc="http://www.opengis.net/ogc"
+    xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.opengis.net/sld http://schemas.opengis.net/sld/1.0.0/StyledLayerDescriptor.xsd">
+    <NamedLayer>
+    <Name>',p[['content']],'</Name>
+    <UserStyle>
+    <Name>',p[['content']],'</Name>
+    <Title>Simple style for ',p[['content']],'</Title>
+    <Abstract>Basic color Map</Abstract>
+    <FeatureTypeStyle>
+    <Rule>
+    <RasterSymbolizer>
+    <Opacity>0.8</Opacity>
+    <ColorMap type="', v$type, '">
+    <ColorMapEntry color="#000000" quantity="-9999" label="nodata" opacity="0.0"/>
+', paste(sprintf('<ColorMapEntry color="%s" quantity="%g" label="%g"/>',cols, vals, vals), collapse='\n'),'
+    </ColorMap>
+    </RasterSymbolizer>
+    </Rule>
+    </FeatureTypeStyle>
+    </UserStyle>
+    </NamedLayer>
+    </StyledLayerDescriptor>
+  ')
+  
+  writeLines(text=xml, con=sld)
 }
 
 fetch_seascapes = function(){
@@ -183,7 +251,7 @@ fetch_seascapes = function(){
   # get ftp connection
   con = getCurlHandle(ftp.use.epsv=F, userpwd=usrpwd)
   
-  if (!file.exists(csv_whoi)){
+  #if (!file.exists(csv_whoi)){
     
     # get list of filenames
     for (i in 1:length(names(url_paths))){ # i = 1
@@ -197,7 +265,7 @@ fetch_seascapes = function(){
           ftp.use.epsv=F, dirlistonly=T) %>% str_split('\n') %>% .[[1]]) %>%
         filter(fname != '') %>%
         mutate(
-          url  = file.path(url_pre, u_i, fname),
+          url  = sprintf('%s/%s%s', url_pre, u_i, fname),
           path = file.path(p_i, fname))
       
       if (i == 1){
@@ -207,14 +275,14 @@ fetch_seascapes = function(){
       }
       
       # wait 5 seconds before next request, otherwise get 'Access denied: 530'
-      Sys.sleep(5)
+      #Sys.sleep(5)
     }
     
     # write csv
     write_csv(d, csv_whoi)
-  }
+  #}
   
-  # con = getCurlHandle(ftp.use.epsv=F, userpwd=usrpwd)
+  con = getCurlHandle(ftp.use.epsv=F, userpwd=usrpwd) # Access denied: 530
   d = read_csv(csv_whoi) %>%
     mutate(
       path_exists = file.exists(path)) %>%
@@ -225,13 +293,15 @@ fetch_seascapes = function(){
   for (i in 1:nrow(d)){ # i = 1
     #for (i in c(178:181,496:499)){
     cat(sprintf('%03d (of %d): fetching %s \n', i, nrow(d), d$fname[i]))
-    content = getBinaryURL(d$url[i], curl=con)
-    writeBin(content, d$path[i])
+    f_url = d$url[i]
+    f_mat = d$path[i]
+    content = getBinaryURL(f_url, curl=con)
+    writeBin(content, f_mat)
   }
 }
 #fetch_seascapes()
 
-write_gs_properties = function(p, dir_gs){
+write_gs_properties = function(p, dir_tif){
   cat('  writing GeoServer *.properties: datastore, indexer, timeregex\n')
   
   # Could not list layers for this store, an error occurred retrieving them: Failed to create reader from file:satellite/gl_sst_curr_09km_mo and hints null
@@ -252,7 +322,7 @@ validate\\ connections=true
 Connection\\ timeout=10
 preparedStatements=true
 "),
-    con = file.path(dir_gs, 'datastore.properties'))
+    con = file.path(dir_tif, 'datastore.properties'))
   
   # indexer.properties
   writeLines(
@@ -262,14 +332,14 @@ ElevationAttribute=elevation
 Schema=*the_geom:Polygon,location:String,ingestion:java.util.Date,elevation:Integer
 PropertyCollectors=TimestampFileNameExtractorSPI[timeregex](ingestion)
 "),
-    con = file.path(dir_gs, 'indexer.properties'))
+    con = file.path(dir_tif, 'indexer.properties'))
   
   # timeregex.properties
   writeLines(
     text = paste0(
 "regex=[0-9]{8}
 "),
-    con = file.path(dir_gs, 'timeregex.properties'))
+    con = file.path(dir_tif, 'timeregex.properties'))
   
 }
 
@@ -285,26 +355,25 @@ PropertyCollectors=TimestampFileNameExtractorSPI[timeregex](ingestion)
 # curl -v -u admin:M******#* -XGET "http://mbon.marine.usf.edu:8080/geoserver/rest/workspaces/satellite/coveragestores/sst4_anom_27km/sst_monthly_mean_27km/index.xml"
 
 # iterate over satellite products ----
+Sys.sleep(60*30)
+
 products = read_csv(sat_csv) %>%
   filter(do==T) # View(products)
 for (i in 1:nrow(products)){ # i = 1
 
   p        = products[i,]
   dir_in   = file.path(dir_root   , p[['dir']])
-  dir_gs   = file.path(dir_gs_pfx , p[['key']])
-  dir_4326 = file.path(dir_4326_pfx, p[['key']])
-  
-  if (!dir.exists(dir_gs))
-    dir.create(dir_gs)
-  if (!dir.exists(dir_4326))
-    dir.create(dir_4326)
+  dir_tif   = file.path(dir_tif_pfx , p[['key']])
+
+  if (!dir.exists(dir_tif))
+    dir.create(dir_tif)
   
   files = list.files(dir_in, sprintf('.*\\.%s$', p[['f_ext']]) , full.names=T)
   
-  if (p[['key']] == 'gl_sst_curr_09km_mo_test3')
+  if (p[['key']] %in% c('gl_sst_curr_09km_mo_test3','gl_chl_curr_09km_mo_test3'))
     files=files[1:3]
   
-  cat(sprintf('\n%d of %d: %s\n  paths:\n    %s\n    ->%s\n    ->%s\n  files: %d *.%s\n', i, nrow(products), p[['key']], dir_in, dir_4326, dir_gs, length(files), p[['f_ext']]))
+  cat(sprintf('\n%d of %d: %s\n  paths:\n    %s\n    ->%s\n  files: %d *.%s\n', i, nrow(products), p[['key']], dir_in, dir_tif, length(files), p[['f_ext']]))
   
   # iterate over files ----
   t0 = Sys.time(); n_done = 0
@@ -312,12 +381,10 @@ for (i in 1:nrow(products)){ # i = 1
     
     # f vars
     f = files[j]
-    f_tif = sprintf('r_%s.tif', f2date(f, p) %>% format('%Y%m%d'))
-    tif_4326 = file.path(dir_4326, f_tif)
-    tif_gs = file.path(dir_gs, f_tif)
-    
+    tif = sprintf('%s/r_%s.tif', dir_tif, f2date(f, p) %>% format('%Y%m%d'))
+
     # TODO: multiply for clim
-    if (!file.exists(tif_4326) | p[['redo_tif_4326']]){
+    if (!file.exists(tif) | p[['redo_tif']]){
     
       # report
       t1 = Sys.time()
@@ -328,33 +395,29 @@ for (i in 1:nrow(products)){ # i = 1
       }
       cat(sprintf(
         '  %03d of %d: %s -> 4326:%s [%s, %1.1f min to go]\n', 
-        j, length(files), basename(f), basename(tif_4326), 
+        j, length(files), basename(f), basename(tif), 
         format(t1, tz='America/Los_Angeles',usetz=TRUE), t_min_left))
       
       # file (nc|mat) to raster
       r = f2raster(f, p)
+      if (is.null(r)){
+        cat('    Error reading!\n')
+        next()
+      }
       
       # raster to tif, unprojected geographic
-      r2tif(r, tif_4326)
+      r2tif(r, tif, p)
     
-      
-    } # end: if (!file.exists(tif_4326) | p[['redo_tif_4326']])
-    
-    if (!file.exists(tif_gs) | p[['redo_tif_gs']]){
-      
-      cat(sprintf('                 -> 3857:%s\n', basename(tif_4326)))
-      
-      # write raster, projected to Mercator & optimized for Geoserver WMS
-      r2tif4gs(tif_4326, tif_gs, p)
-      
       n_done = n_done + 1  
-    } # end: if (!file.exists(tif_gs) | p[['redo_tif_gs']])
+    } # end: if (!file.exists(tif) | p[['redo_tif']])
     
   } # end: for (f in files)
   
   # write geoserver property files
-  write_gs_properties(p, dir_gs)
+  write_gs_properties(p, dir_tif)
   
+  # write sld
+  create_sld(p, dir_tif)
   # TODO: set permissions
   # ben@mbon: cd /mnt/mbon-supplement/geoserver; sudo chgrp -R users satellite; sudo chmod 775 -R satellite
   
