@@ -83,6 +83,9 @@ if (!exists('eez_all')){
     st_set_crs(4326)
 }
 
+eez_all %>%
+  write_sf('/mbon-local/postgresql/shp/eez_wfs.shp') # /var/lib/postgresql/shp/eez_wfs.shp
+
 # show table without geom
 # eez_all %>%
 #   st_set_geometry(NULL)
