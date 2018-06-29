@@ -222,13 +222,9 @@ vi occurrences.vrt
 #ogrinfo -ro -al $csv X_POSSIBLE_NAMES=decimalLongitude Y_POSSIBLE_NAMES=decimalLatitude -oo KEEP_GEOM_COLUMNS=NO
 rinfo -ro -al $c$vrt ``
 
-,
-```
+,`
 
-```
-
-
-## load EEZ, WDPA shp into db
+`` load EEZ, WDPA shp into db
 
 [shp2pgsql: Using the ESRI Shapefile Loader](http://postgis.net/docs/using_postgis_dbmanagement.html#shp2pgsql_usage)
 
