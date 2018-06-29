@@ -193,7 +193,7 @@ Using [CSV Driver | GDAL.org](http://www.gdal.org/drv_csv.html):
     </OGRVRTLayer>
 </OGRVRTDataSource>
 
-`bash
+`ba``sh
 csocc="/Users/bbest/github/obis-lat-time-fig/data/occurrences"
 csv="$occ.csv"
 vrt="$occ.vrt"
@@ -220,9 +220,7 @@ vi occurrences.vrt
 
 ```bash
 #ogrinfo -ro -al $csv X_POSSIBLE_NAMES=decimalLongitude Y_POSSIBLE_NAMES=decimalLatitude -oo KEEP_GEOM_COLUMNS=NO
-rinfo -ro -al $c$vrt ``
-
-,`
+rinfo -ro -al $c$vrt `,`
 
 `` load EEZ, WDPA shp into db
 
