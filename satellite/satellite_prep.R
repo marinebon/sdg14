@@ -500,6 +500,26 @@ r2eez_csv = function(i){ # i=1
   d
 }
 
+eez_s005_shp     = file.path(dir_local, 'boundaries/eez_s005.shp')
+eez_s005005_shp  = file.path(dir_local, 'boundaries/eez_s005005.shp')
+simplify_eez = function(){
+  if (!file.exists(eez_s005005_shp)){
+    library(geojsonio)
+    eez_s005 = read_sf(eez_s005_shp) # plot(eez_s005['Territory1'])
+    #object.size(eez_s005) %>% print(units='Mb') # 11.1 Mb
+    
+    # simplify eez
+    eez_s005005 = eez_s005 %>%
+      geojson_json() %>% # convert to geojson for faster ms_simplify; 69.6 sec
+      ms_simplify(keep=0.05, keep_shapes=T, explode=F) %>% # simplify; 11.9 minutes
+      geojson_sp() %>% st_as_sf() # convert back to simple features
+    # plot(eez_s005005['Territory1'])
+    
+    write_sf(eez_s005005, eez_s005005_shp)
+  }
+}
+
+
 # TODO: [Manage ImageMosaic content through REST API — GeoServer Training](http://geoserver.geo-solutions.it/edu/en/multidim/rest/index.html)
 # library(geosapi) # devtools::install_github("eblondel/geosapi")
 # gsman <- GSManager$new(

@@ -1,0 +1,34 @@
+---
+title: "Test"
+author: "Ben Best"
+date: "4/13/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## elasticsearchr
+
+[elasticsearchr: a Lightweight Elasticsearch Client for R](https://cran.r-project.org/web/packages/elasticsearchr/vignettes/quick_start.html)
+
+```{r}
+devtools::install_github("alexioannides/elasticsearchr")
+```
+
+
+```{r}
+library(elasticsearchr)
+
+# elastic search datasource
+es <- elastic("http://localhost:9200", "iris", "data")
+
+# insert new data
+elastic("http://localhost:9200", "iris", "data") %index% iris
+# NOTE: To explicitly specify document ids,
+#   there must be a column in the data frame that is labelled "id"
+
+
+```
+

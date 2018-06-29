@@ -183,7 +183,7 @@ install.packages("sf")
 
 Using [CSV Driver | GDAL.org](http://www.gdal.org/drv_csv.html):
 
-``
+```xml
 <OGRVRTDataSource>
     <OGRVRTLayer name="test">
         <SrcDataSource>test.csv</SrcDataSource>
@@ -192,8 +192,9 @@ Using [CSV Driver | GDAL.org](http://www.gdal.org/drv_csv.html):
         <GeometryField encoding="PointFromColumns" x="Longitude" y="Latitude"/>
     </OGRVRTLayer>
 </OGRVRTDataSource>
+```
 
-`bash
+```bash
 csocc="/Users/bbest/github/obis-lat-time-fig/data/occurrences"
 csv="$occ.csv"
 vrt="$occ.vrt"
@@ -220,15 +221,10 @@ vi occurrences.vrt
 
 ```bash
 #ogrinfo -ro -al $csv X_POSSIBLE_NAMES=decimalLongitude Y_POSSIBLE_NAMES=decimalLatitude -oo KEEP_GEOM_COLUMNS=NO
-rinfo -ro -al $c$vrt ``
-
-,
+rinfo -ro -al $c$vrt
 ```
 
-```
-
-
-# load shp into db
+## load EEZ, WDPA shp into db
 
 [shp2pgsql: Using the ESRI Shapefile Loader](http://postgis.net/docs/using_postgis_dbmanagement.html#shp2pgsql_usage)
 
@@ -240,6 +236,8 @@ cd /Users/bbest/github/mbon
 shp2pgsql -i -D -d -s 4269 -I ./data/World_EEZ_v9_20161021/eez.shp eez | psql -d mbon
 shp2pgsql -i -D -d -s 4269 -I ./data/WDPA_Dec2016-shapefile/WDPA_Dec2016-shapefile-polygons.shp wdpa | psql -d shipwrecks
 ```
+
+## Try `sf::st_write`
 
 ```bash
 brew install qscintilla2
@@ -259,8 +257,6 @@ st_write(ply, sprintf('PG:dbname=%s', db), obj, layer_options = 'OVERWRITE=true'
 
 # test if column is unique
 #select mrgid from eez group by mrgid having count(*) > 1;
-
-
 
 system.time({
   res = dbGetQuery(
