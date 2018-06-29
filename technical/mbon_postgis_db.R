@@ -63,10 +63,13 @@ qry("
 
 ALTER TABLE obis ADD COLUMN depth_int INTEGER;
 UPDATE obis SET depth_int = CASE WHEN depth='' THEN NULL else depth::numeric::integer END;
+
+-- TODO:
 ALTER TABLE obis ADD COLUMN year_int INTEGER;
 UPDATE obis SET year_int = CASE WHEN year='' THEN NULL else year::numeric::integer END;
 CREATE INDEX CONCURRENTLY idx_obis_yr_d ON obis(year, depth);
 CREATE INDEX CONCURRENTLY idx_obis_eez ON obis(eez_mrgid);
+CREATE INDEX CONCURRENTLY idx_obis_wormsid ON obis(worms_id);
 ")
 
 flds_keep = c('id','lon','lat','depth','eventDate','year','scientificName','worms_id','taxonomicgroup','kingdom','phylum','class','taxa_order','family','genus','species','qc','geom','rl_status','rl_weight','eez_mrgid')
@@ -153,7 +156,15 @@ FROM obis AS o
 JOIN eez_s005 AS e ON ST_Within(o.geom, e.geom)
 WHERE e.pol_type='200NM' AND e.mrgid NOT IN (5690, 8463, 8493);
 
+SELECT COUNT(*) AS n, COUNT(DISTINCT(worms_id)) AS n_spp FROM obis WHERE eez_mrgid = 5690;
+   n    | n_spp 
+--------+-------
+
+SELECT eez_mrgid, COUNT(*) AS n, COUNT(DISTINCT(worms_id)) AS n_spp FROM obis WHERE eez_mrgid IN (8493, 8463) GROUP BY eez_mrgid;
+
+
 UPDATE obis o SET eez_mrgid = e.mrgid FROM (SELECT mrgid, geom FROM eez_s005 WHERE pol_type='200NM') e WHERE ST_Within(o.geom, e.geom);")
+
 
 sql = sprintf('SELECT COUNT(worms_id) AS n, COUNT(DISTINCT(worms_id)) n_spp FROM obis;')
 
@@ -161,6 +172,7 @@ sql = sprintf('SELECT COUNT(worms_id) AS n, COUNT(DISTINCT(worms_id)) n_spp FROM
 qry("ALTER TABLE obis ADD COLUMN in_wdpa BOOLEAN;")
 qry("UPDATE obis AS o SET in_wdpa = TRUE FROM wdpa AS w WHERE ST_Within(o.geom, w.wkb_geometry);")
 
+res = dbGetQuery(con, "SELECT eez_mrgid, COUNT(*) AS n_obs, COUNT(DISTINCT(species)) AS n_spp FROM obis WHERE class IN ('Aves') GROUP BY eez_mrgid;")
 
 # TODO: pool ----
 library(pool)
