@@ -38,6 +38,8 @@ con = dbConnect(
 dbGetQuery(con, "SELECT postgis_full_version();")
 # POSTGIS="2.3.2 r15302" GEOS="3.4.2-CAPI-1.8.2 r3921" PROJ="Rel. 4.8.0, 6 March 2012" GDAL="GDAL 1.10.1, released 2013/08/26" LIBXML="2.9.1" LIBJSON="0.11.99" RASTER
 
+dbListTables(con)
+
 qry = function(sql){
   r = dbSendStatement(con, sql)
   cat(sprintf('dbGetRowsAffected(): %d\n', dbGetRowsAffected(r)))
@@ -45,7 +47,9 @@ qry = function(sql){
 }
 
 # o = st_read_db(con, 'o')
-# eez = st_read_db(con, query="SELECT * FROM eez WHERE pol_type='200NM'")
+eez = st_read_db(con, query="SELECT * FROM eez WHERE pol_type='200NM'")
+
+plot(eez[1])
 
 # obis table ----
 # update obis table after loading from obis.csv (download.iobis.org) using pgfutter
