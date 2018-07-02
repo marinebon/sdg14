@@ -1,0 +1,173 @@
+---
+title: "AquaMaps ingest"
+author: "Ben Best"
+date: "June 29, 2018"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load 100K Rows
+
+- [AquaMaps Environmental Dataset: Half-Degree Cells Authority File (HCAF)](https://www.aquamaps.org/main/envt_data.php)
+
+```{r inspect}
+library(tidyverse)
+library(raster)
+library(glue)
+
+# dir & csv's
+#dir_dat   <- "/Users/bbest/Desktop/aquamaps_ver0816c"
+dir_dat   <- "/Volumes/Best HD/mbon_data_big/aquamaps"
+spp_csv   <- file.path(dir_dat, "speciesoccursum_ver0816c.csv")
+obs_csv   <- file.path(dir_dat, "occurrencecells_ver0816c_head-100K-rows.csv")
+#cells_csv <- file.path(dir_dat, "hcaf_species_native_ver0816c_head-100K-rows.csv")
+cells_csv <- file.path(dir_dat, "hcaf_species_native_ver0816c.csv")
+dir_spp   <- file.path(dir_dat, "species_rasters")
+
+cells <- read_csv(cells_csv)
+spp   <- read_csv(spp_csv) # head(occ)
+obs   <- read_csv(obs_csv)
+
+# AquaMaps raster specifications for 0.5 degree global raster
+r_s <- list(
+  xmin = , xmax = , ymin = , ymax = , 
+  res = , crs = )
+r_na <- raster(
+  xmn = -180, xmx = 180, ymn = -90, ymx = 90, 
+  resolution=0.5, crs=4326)
+```
+
+
+```{r}
+
+
+https://rdrr.io/cran/rpostgis/man/pgGetRast.html
+```
+
+## Functions
+
+```{r functions}
+raster_trim <- function(r){
+  # source: /Users/bbest/github/nrelutils/R/raster_utils.R
+  
+  # raster::trim() crazy slow compared to this
+  r_m          <- is.na(raster::as.matrix(r))
+  col_notna    <- which(colSums(r_m) != nrow(r))
+  row_notna    <- which(rowSums(r_m) != ncol(r))
+  extent_notna <- raster::extent(
+    r,
+    row_notna[1], row_notna[length(row_notna)],
+    col_notna[1], col_notna[length(col_notna)])
+  raster::crop(r, extent_notna)
+}
+
+```
+
+## Map
+
+```{r }
+sp_id_to_tif <- function(sp_id){
+  # , cells=cells, r_na=r_na, dir_spp=dir_spp
+  
+  # get cells
+  cells_sp <- cells %>%
+    filter(SpeciesID == sp_id) %>%
+    mutate(
+      cell = cellFromXY(r_na, matrix(data = c(CenterLong, CenterLat), ncol=2)))
+  
+  # assign to raster
+  r_sp <- r_na
+  r_sp[cells_sp$cell] <- cells_sp$probability
+  r_sp <- raster_trim(r_sp) # plot(r_sp)
+  
+  # write out
+  r_sp_tif <- glue("{dir_spp}/{sp_id}.tif")
+  writeRaster(r_sp, r_sp_tif, overwrite=T)
+}
+
+spp_ids <- distinct(cells, SpeciesID) %>% pull(SpeciesID)
+
+# takes 8.8 hours, 472 MB
+for (i in 1:length(spp_ids)){ # i = 1
+  cat(sprintf("%04d of %d: %s -- %s\n", i, length(spp_ids), sp_id, Sys.time()))
+  # https://www.aquamaps.org/preMap2.php?cache=1&SpecID=Fis-22812
+  sp_id <- spp_ids[i]
+  
+  sp_id_to_tif(sp_id)
+}
+
+#0001 of 24904: Fis-22812 -- 2018-07-01 20:49:01
+```
+
+```{r}
+
+spp_ids
+
+```
+
+
+```{r time, eval=F}
+library(fs)
+#0001 of 24904: Fis-22812 -- 2018-07-01 20:49:01
+dir_spp <- "/Volumes/Best HD/mbon_data_big/aquamaps/species_rasters"
+file_info(dir_ls(dir_spp)) %>% 
+  summarize(
+    size = mean(size)) %>%
+  pull(size) * 24904 / 1000000
+  
+0001 of 24904: Fis-22812 -- 2018-07-01 20:49:01
+0349 of 24904: Fis-29786 -- 2018-07-01 20:56:19
+1214 of 24904: Fis-30623 -- 2018-07-01 21:15:14
+24904 of 24904: WBD-Eup-82 -- 2018-07-02 05:36:41
+i_all <- 24904; t_beg <- as_datetime("2018-07-01 20:49:01")
+i_now <- 1214; t_now <- as_datetime("2018-07-02 05:36:41")
+difftime(t_now, t_beg, units="hours") / i_now * (i_all - i_now) + t_now
+```
+
+## PostGIS
+
+- [`rpostgis::`](https://github.com/mablab/rpostgis): R Interface to a 'PostGIS' Database
+  - [`pgWriteRast(conn, name, raster, bit.depth = NULL, blocks = NULL, constraints = T, overwrite = F)`](https://rdrr.io/cran/rpostgis/man/pgWriteRast.html): write raster to PostGIS database table
+    - as RasterStack?
+  - [`pgGetRast(conn, name, rast = "rast", bands = 1, boundary = NULL)`](https://rdrr.io/cran/rpostgis/man/pgGetRast.html): load raster from PostGIS database
+  - [`pgListRast(conn)`](https://rdrr.io/cran/rpostgis/man/pgListGeom.html): list geometries/rasters
+  - [`pgGetBoundary(conn, name, geom = "geom", clauses = NULL)`](https://rdrr.io/cran/rpostgis/man/pgGetBoundary.html): retrieve bounding envelope of geometries or rasters
+- [PostGIS Manual](http://postgis.net/docs/)
+  - [Chapter 5. Raster Data Management, Queries, and Applications](http://postgis.net/docs/using_raster_dataman.html#RT_Creating_Rasters)
+  - [Chapter 9. Raster Reference](https://postgis.net/docs/RT_reference.html)
+  - [Chapter 10. PostGIS Raster Frequently Asked Questions](https://postgis.net/docs/RT_FAQ.html)
+  - [ST_BandPixelType](http://postgis.net/docs/RT_ST_BandPixelType.html)
+  - [WKTRasterTutorial01 – PostGIS](https://trac.osgeo.org/postgis/wiki/WKTRasterTutorial01)
+    - "use the `st_intersection()` function and `st_intersects()` operator which operates directly on raster and geometries by vectorizing only the necessary part of the raster before doing the intersection and is one of the main feature of PostGIS WKT Raster"
+    - [Summarizing the elevation values for each buffer and exporting the table to CSV](https://trac.osgeo.org/postgis/wiki/WKTRasterTutorial01#SummarizingtheelevationvaluesforeachbufferandexportingthetabletoCSV)
+    - [Intersecting a raster with a polygon using PostGIS - artefact error - Geographic Information Systems Stack Exchange](https://gis.stackexchange.com/questions/19856/intersecting-a-raster-with-a-polygon-using-postgis-artefact-error)
+- [(15) Vector-raster server-side analysis: A PostGIS benchmark](https://www.researchgate.net/publication/236035254_Vector-raster_server-side_analysis_A_PostGIS_benchmark)
+- [Postgres / PostGIS - Of Rasters and GeoJSONs | GeoNET](http://www.geonet.ch/postgres-postgis-of-rasters-and-geojsons/)
+  - [postgresql - Create an empty tiled raster table in PostGIS - Stack Overflow](https://stackoverflow.com/questions/37910493/create-an-empty-tiled-raster-table-in-postgis)
+
+- https://github.com/CartoDB/CartoDB
+- [sverhoeven/cartodb - Docker Hub](https://hub.docker.com/r/sverhoeven/cartodb/)
+  - `docker run -d -p 80:80 -h cartodb.localhost sverhoeven/cartodb`
+- [Using Mapbox Vector Tiles in CARTO for Maps & Location Apps — CARTO Blog](https://carto.com/blog/using-mvt-in-carto/)
+
+- [PostGIS Raster test - Draw a figure and click on it to see the avg raster value - Jorge Arévalo bl.ocks.org](http://bl.ocks.org/jorgeas80/4c7169c9b6356858f3cc)
+
+- `raster2pgsql`
+
+- [Working with PostGIS | TileMill](https://tilemill-project.github.io/tilemill/docs/guides/postgis-work/)
+
+
+- `ST_Shift_Longitude` - [Exploring Data Formats and Fields](https://docs.qgis.org/2.18/en/docs/user_manual/managing_data_source/supported_data.html#vector-layers-crossing-180-degrees-longitude)
+
+## OHI Species
+
+* [OHI: Species subgoal](https://rawgit.com/OHI-Science/ohiprep/master/globalprep/spp_ico/v2016/spp_data_prep.html)
+* [ohiprep/globalprep/spp_ico/v2018 at master · OHI-Science/ohiprep](https://github.com/OHI-Science/ohiprep/tree/master/globalprep/spp_ico/v2018)
+* [Goals](http://ohi-science.org/goals/#biodiversity)
+* [https://rawgit.com/OHI-Science/ohiprep/master/src/dataOrganization_SOP.html](https://rawgit.com/OHI-Science/ohiprep/master/src/dataOrganization_SOP.html)
+* [ohiprep/spp_am_v_iucn.R at c18fa47888ab28c36229a796d717d3336d4dc012 · OHI-Science/ohiprep](https://github.com/OHI-Science/ohiprep/blob/c18fa47888ab28c36229a796d717d3336d4dc012/globalprep/spp_ico/vAM_IUCN/spp_am_v_iucn.R)
