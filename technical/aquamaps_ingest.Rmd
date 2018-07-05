@@ -1,24 +1,30 @@
 ---
 title: "AquaMaps ingest"
 author: "Ben Best"
-date: "June 29, 2018"
-output: html_document
+date: '`r format(Sys.Date(), "%Y-%m-%d")`'
+output:
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_float: true
 editor_options: 
   chunk_output_type: console
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning=F, eval=T)
 ```
 
-## Load 100K Rows
+## Initialize
 
 - [AquaMaps Environmental Dataset: Half-Degree Cells Authority File (HCAF)](https://www.aquamaps.org/main/envt_data.php)
 
-```{r inspect}
+```{r load}
 library(tidyverse)
-library(raster)
 library(glue)
+library(fs)
+library(raster)
+library(leaflet)
 
 # dir & csv's
 #dir_dat   <- "/Users/bbest/Desktop/aquamaps_ver0816c"
@@ -29,29 +35,17 @@ obs_csv   <- file.path(dir_dat, "occurrencecells_ver0816c_head-100K-rows.csv")
 cells_csv <- file.path(dir_dat, "hcaf_species_native_ver0816c.csv")
 dir_spp   <- file.path(dir_dat, "species_rasters")
 
-cells <- read_csv(cells_csv)
 spp   <- read_csv(spp_csv) # head(occ)
-obs   <- read_csv(obs_csv)
+#cells <- read_csv(cells_csv)
+#obs   <- read_csv(obs_csv)
 
 # AquaMaps raster specifications for 0.5 degree global raster
-r_s <- list(
-  xmin = , xmax = , ymin = , ymax = , 
-  res = , crs = )
 r_na <- raster(
   xmn = -180, xmx = 180, ymn = -90, ymx = 90, 
-  resolution=0.5, crs=4326)
+  resolution=0.5, crs=leaflet:::epsg4326)
 ```
 
-
-```{r}
-
-
-https://rdrr.io/cran/rpostgis/man/pgGetRast.html
-```
-
-## Functions
-
-```{r functions}
+```{r helper functions}
 raster_trim <- function(r){
   # source: /Users/bbest/github/nrelutils/R/raster_utils.R
   
@@ -66,11 +60,6 @@ raster_trim <- function(r){
   raster::crop(r, extent_notna)
 }
 
-```
-
-## Map
-
-```{r }
 sp_id_to_tif <- function(sp_id){
   # , cells=cells, r_na=r_na, dir_spp=dir_spp
   
@@ -89,6 +78,12 @@ sp_id_to_tif <- function(sp_id){
   r_sp_tif <- glue("{dir_spp}/{sp_id}.tif")
   writeRaster(r_sp, r_sp_tif, overwrite=T)
 }
+```
+
+## Table (\*.csv) to Map (\*.tif) for All Species
+
+```{r spp to tif, eval=F}
+cells <- read_csv(cells_csv)
 
 spp_ids <- distinct(cells, SpeciesID) %>% pull(SpeciesID)
 
@@ -101,35 +96,263 @@ for (i in 1:length(spp_ids)){ # i = 1
   sp_id_to_tif(sp_id)
 }
 
-#0001 of 24904: Fis-22812 -- 2018-07-01 20:49:01
-```
+# estimate time to completion ----
+  
+# 0001 of 24904: Fis-22812 -- 2018-07-01 20:49:01
+# 0349 of 24904: Fis-29786 -- 2018-07-01 20:56:19
+# 1214 of 24904: Fis-30623 -- 2018-07-01 21:15:14
+# 24904 of 24904: WBD-Eup-82 -- 2018-07-02 05:36:41
+i_all <- 24904; t_beg <- as_datetime("2018-07-01 20:49:01")
+i_now <- 1214; t_now <- as_datetime("2018-07-02 05:36:41")
+difftime(t_now, t_beg, units="hours") / i_now * (i_all - i_now) + t_now
 
-```{r}
-
-spp_ids
-
-```
-
-
-```{r time, eval=F}
-library(fs)
-#0001 of 24904: Fis-22812 -- 2018-07-01 20:49:01
+# calculate avg file size ----
 dir_spp <- "/Volumes/Best HD/mbon_data_big/aquamaps/species_rasters"
 file_info(dir_ls(dir_spp)) %>% 
   summarize(
     size = mean(size)) %>%
   pull(size) * 24904 / 1000000
-  
-0001 of 24904: Fis-22812 -- 2018-07-01 20:49:01
-0349 of 24904: Fis-29786 -- 2018-07-01 20:56:19
-1214 of 24904: Fis-30623 -- 2018-07-01 21:15:14
-24904 of 24904: WBD-Eup-82 -- 2018-07-02 05:36:41
-i_all <- 24904; t_beg <- as_datetime("2018-07-01 20:49:01")
-i_now <- 1214; t_now <- as_datetime("2018-07-02 05:36:41")
-difftime(t_now, t_beg, units="hours") / i_now * (i_all - i_now) + t_now
 ```
 
-## PostGIS
+## Range Normalized Cumulative Species Map
+
+To demonstrate the methodology of "range normalization", let's compare a cumulative species map with and without range normalization for two species with very different ranges:
+
+- **contracted**: [North Atlantic right whale (_Eubalaena glacialis_)](https://www.aquamaps.org/preMap2.php?cache=1&SpecID=ITS-Mam-180537)
+
+  ![](https://www.aquamaps.org/imagethumb/workimagethumb.php?s=http://www.aquamaps.org/imagethumb/file_destination/exp_8_pic_ITS-Mam-180537.jpg&w=250)
+
+- **expansive**: [blue whale (_Balaenoptera musculus_)](https://www.aquamaps.org/preMap2.php?cache=1&SpecID=ITS-Mam-180528)
+
+  ![](https://www.aquamaps.org/imagethumb/workimagethumb.php?s=http://www.aquamaps.org/imagethumb/file_destination/exp_8_pic_ITS-Mam-180528.jpg&w=250)
+  
+For a given cell ($c$), we might simply take the sum of AquaMap's Relative Environmental Suitability (RES; $e$; ranging in value [0, 1]) per species ($s$) across the number of species ($S$) to arrive at a cumulative species richness ($R$) that is weighted by the species suitability within the given cell:
+
+$$
+{R_c} = \sum_{s=1}^{S} e_{s,c}
+$$
+
+This approach however gives equal weight for any given cell to a species with a contracted range as an expansive one. From a population perspective, this overrepresents the expansive range. To account for small areas with high degrees of unique endemism, we can "range normalize" by dividing the given relative environmental suitability for the species and cell ($e_{s,i}$) by the sum of the species relative environmental suitability ($E_s$) across all cells ($C$), i.e. the whole range:
+
+$$
+E_s = \sum_{c=1}^{C} e_{s} \\
+{RN\ R_c} = \sum_{s=1}^{S} \frac{ e_{s,c} }{ E_s }
+$$
+
+
+
+```{r range normalize}
+# species id's for right whale and blue whale
+sid_blue  <- "ITS-Mam-180528"
+sid_right <- "ITS-Mam-180537"
+# IUCN extinction risk status
+ext_blue  <- "EN"
+ext_right <- "CR"
+
+# extinction risk weights
+# bumping up LC to 0.2 to give credit for presence and not expecting extinct 1.2
+ext_wts <- c(LC=0.2, NT=0.4, VU=0.6, EN=0.8, CR=1, EX=1.2)
+
+get_am_raster <- function(sid, range_normalize=F, for_leaflet=T){
+  # Get AquaMaps raster
+  # sid: species id # sid <- sid_right
+  tif <- glue("{dir_spp}/{sid}.tif")
+  r <- raster(tif, crs=leaflet:::epsg4326)
+  b <- extent(r)
+  
+  if (range_normalize)
+    r <- r / sum(values(r), na.rm=T)
+
+  # TODO: add r in geographic as attr()
+  r_gcs <- r
+  if (for_leaflet){
+    r <- projectRasterForLeaflet(r, method="ngb")
+    attr(r, "r_gcs") <- r_gcs 
+  }
+  
+  # set bounds for use with leaflet::fitBounds() # , , , 
+  attr(r, "bounds") <- list(lng1 = b@xmin, lat1 = b@ymin, lng2 = b@xmax, lat2 = b@ymax) 
+  r
+}
+
+# rasters for species relative environmental suitability [0 - 1]
+r_right <-  get_am_raster(sid_right)
+r_blue  <-  get_am_raster(sid_blue) # plot(r_blue)
+#r_right_n <-  get_am_raster(sid_right, range_normalize=T)
+#r_blue_n  <-  get_am_raster(sid_blue, range_normalize=T)
+
+add_am_rasters <- function(..., spp_wts=NULL, spp_range_normalize=T, spp_all_normalize=T){
+  # spp_range_normalize: for each species map, divide by sum of all pixels, before summing
+  # spp_all_normalize: after summing all species maps, divide by max pixel value to get range [0,1]
+  # spp_wts: species weights, to apply in same order as rasters. defaults to 1
+  # TODO: add species richness factor, so more species -> stronger result
+  # ...: rasters
+  
+  rasters <- list(...)
+  
+  extend_r_gcs <- function(r, normalize){
+    r_gcs <- attr(r, "r_gcs")
+    
+    if (normalize)
+      r_gcs <- r_gcs / cellStats(r_gcs, stat='sum', na.rm=T)
+    
+    extend(r_gcs, r_na)
+  }
+  
+  # range normalize (if T) and extend (to stack) all input rasters
+  s <- stack(lapply(rasters, extend_r_gcs, spp_range_normalize))
+  #s0 <- stack(lapply(rasters, extend_r_gcs, F))
+  
+  #r1 <- raster(s, layer=1); plot(r1, col=rev(rainbow(255)))
+  #r2 <- raster(s, layer=2); plot(r2, col=rev(rainbow(255)))
+  
+  if (!is.null(spp_wts)){
+    stopifnot(length(rasters)==length(spp_wts))
+    for (i in 1:length(spp_wts))
+      s[[i]] <- raster(s, layer=i) *  spp_wts[i]
+  } #else {
+    #spp_wts = rep(1, length(rasters))
+  #}
+    
+  # spp_wts <- ext_wts[c(ext_right, ext_blue)]
+  
+  # get weighted mean
+  #r <- weighted.mean(s, spp_wts)
+  
+  # sum across all species rasters
+  #r <- calc(s, function(x) )
+  r <- calc(s, fun = sum, na.rm = T)
+  #plot(raster(s, layer=1), col=rev(rainbow(255)))
+  
+  # mask
+  m <- overlay(s, fun=function(x) ifelse(sum(!is.na(x)) > 0, 1, NA))
+  r <- mask(r, m)
+  
+  # trim
+  r <- raster_trim(r)
+  #summary(r); plot(r, col=rev(rainbow(255)))
+  #summary(r0); plot(r0, col=rev(rainbow(255)))
+  #summary(r0); plot(stack, r0)
+  #r <- calc(s, fun = sum, na.rm = T)
+  #summary(r0)
+  
+  if (spp_all_normalize)
+    r <- r / cellStats(r, stat='max', na.rm=T)
+  
+  # project for leaflet
+  r <- projectRasterForLeaflet(r, method="ngb")
+  
+  r
+}
+
+r_sum   <- add_am_rasters(r_right, r_blue, spp_range_normalize=F, spp_all_normalize=F, spp_wts = NULL)
+r_nrsum <- add_am_rasters(r_right, r_blue, spp_range_normalize=T, spp_all_normalize=F, spp_wts = NULL)
+
+#plot(r_sum)
+#plot(r_nrsum)
+#r_add3 <- add_am_rasters(r_right, r_blue, spp_range_normalize=T, spp_all_normalize=T, spp_wts = NULL)
+#r_add4 <- add_am_rasters(r_right, r_blue, spp_range_normalize=T, spp_all_normalize=T, 
+#                         spp_wts = ext_wts[c(ext_right, ext_blue)])
+
+# summary(r_sum)
+# summary(r_nrsum)
+# summary(r_add3)
+# summary(r_add4)
+
+fit_am_raster <- function(map, r){
+  bounds <- attr(r, "bounds")
+  with(bounds, fitBounds(map, lng1, lat1, lng2, lat2))
+}
+
+add_am_raster <- function(m, r, lyr_name, r_type="spp"){
+  # r_type="spp" or "sum"
+  # r <- r_right
+  
+  max_r <- cellStats(r, stat='max', na.rm=T)
+  sum_r <- cellStats(r, stat='sum', na.rm=T)
+
+  rng <- c(0, 1)
+  if (r_type != "spp"){
+    rng <- c(0, cellStats(r, stat='max', na.rm=T))
+  }
+  
+  pal <- colorNumeric(
+    "inferno", rng, na.color = "transparent", reverse=T)
+
+  lab_sci <- function(v, type="numeric"){
+    #browser()
+    if (r_type == "spp"){
+      labs <- case_when(
+        v == 0 ~ "0, 0",
+        v == last(v) ~ as.character(glue(
+          "{v}, {formatC(v/sum_r, format = 'e', digits = 1)}")),
+        TRUE ~ "")
+    } else {
+      #if (lyr_name == "sum NR RES") browser()
+      labs <- case_when(
+        v == 0 ~ "0, 0",
+        v == last(v) ~ as.character(glue(
+          "{v}, 1")),
+        TRUE ~ "")
+    }
+    labs
+  }
+  
+  m %>%
+    addRasterImage(
+      r, colors = pal, opacity = 0.6, project=F, 
+      group=lyr_name) %>%
+    addLegend(
+      group = lyr_name, pal = pal,
+      position = "bottomright",
+      values = rng, labFormat = lab_sci,
+      title = ifelse(
+        r_type == "spp",
+        glue("{lyr_name} (RES, RN RES)<br>&nbsp;&nbsp;sum={format(sum_r, big.mark=',', digits=1, nsmall=1)}"),
+        glue("{lyr_name} (max, 1)")))
+}
+
+map_am_layer <- function(lyr){
+  
+  m <- leaflet() %>%
+    addProviderTiles(
+      providers$Esri.OceanBasemap, options=providerTileOptions(opacity=0.6)) %>%
+    add_am_raster(r_right, "right whale") %>%
+    add_am_raster(r_blue, "blue whale") %>%
+    add_am_raster(r_sum, "sum", r_type="sum") %>%
+    add_am_raster(r_nrsum, "sum RN", r_type="sum") %>%
+    addLayersControl(
+      baseGroups = c("ESRI Ocean Basemap"),
+      overlayGroups = c("right whale", "blue whale", "sum", "sum RN"),
+      options = layersControlOptions(collapsed = T)) %>%
+    fit_am_raster(r_blue) %>%
+    addMiniMap(position = "bottomleft", toggleDisplay = T, minimized = T) %>%
+    hideGroup("blue whale") %>%
+    hideGroup("right whale") %>%
+    hideGroup("sum") %>%
+    hideGroup("sum RN") %>%
+    showGroup(lyr)
+  m
+}
+
+map_am_layer("blue whale")
+map_am_layer("right whale")
+map_am_layer("sum")
+map_am_layer("sum RN")
+```
+
+
+## Research
+
+### Biodiversity Assessment
+
+- [Zotero | Groups > mbon-indicators > Library](https://www.zotero.org/groups/2202521/mbon-indicators/items)
+
+- Cochrane et al (2016) [What Is Marine Biodiversity? Towards Common Concepts and Their Implications for Assessing Biodiversity Status](https://www.frontiersin.org/articles/10.3389/fmars.2016.00248/full) _Frontiers in Mar Sci_
+
+- Pimm et al (2014) [The biodiversity of species and their rates of extinction, distribution, and protection](http://science.sciencemag.org/content/344/6187/1246752) _Science_
+
+### PostGIS
 
 - [`rpostgis::`](https://github.com/mablab/rpostgis): R Interface to a 'PostGIS' Database
   - [`pgWriteRast(conn, name, raster, bit.depth = NULL, blocks = NULL, constraints = T, overwrite = F)`](https://rdrr.io/cran/rpostgis/man/pgWriteRast.html): write raster to PostGIS database table
@@ -164,7 +387,27 @@ difftime(t_now, t_beg, units="hours") / i_now * (i_all - i_now) + t_now
 
 - `ST_Shift_Longitude` - [Exploring Data Formats and Fields](https://docs.qgis.org/2.18/en/docs/user_manual/managing_data_source/supported_data.html#vector-layers-crossing-180-degrees-longitude)
 
-## OHI Species
+### OHI Biodiversity: Species
+
+Here's how the presence of species (binary, from IUCN range map or AquaMaps RES > 0.4) in a given region was assessed for average extinction risk (using IUCN extinction category.)
+
+- Selig et al (2014) [Global Priorities for Marine Biodiversity Conservation](http://journals.plos.org/plosone/article?id=10.1371/journal.pone.0082898) _PLoS ONE_
+- [OHI Goals](http://ohi-science.org/goals/#biodiversity)
+
+$$
+x_{SPP} = \frac{\sum_{k=1}^{M} (\frac{\sum_{i=1}^{N} w_{i}}{N}) * A_{C}}{A_{T}} 
+$$
+
+- $M$ = number of grid cells in the assessment region
+
+- $N$ = number species in a grid cell $c$
+
+- $A$ = total area of a grid cell [$c$] the assessment region [T]
+
+- $w_{i}$ = status weight assigned per threat 
+
+assessed species list and maps: IUCN
+
 
 * [OHI: Species subgoal](https://rawgit.com/OHI-Science/ohiprep/master/globalprep/spp_ico/v2016/spp_data_prep.html)
 * [ohiprep/globalprep/spp_ico/v2018 at master · OHI-Science/ohiprep](https://github.com/OHI-Science/ohiprep/tree/master/globalprep/spp_ico/v2018)
