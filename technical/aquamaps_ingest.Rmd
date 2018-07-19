@@ -90,6 +90,15 @@ sp_id_to_tif <- function(sp_id){
 }
 ```
 
+```{r raster::area, eval=F}
+# calculate area of raster cells (km2)
+r_a <- area(r_na)
+
+# summarize and plot
+summary(values(r_a))
+plot(r_a)
+```
+
 ## Table (\*.csv) to Map (\*.tif) for All Species
 
 ```{r spp to tif, eval=F}
@@ -168,42 +177,6 @@ $$
 - $w_s$: IUCN extinction risk weight of species
 
 Note that the (IUCN extinction risk) weight ($w_s$) is not part of the range normalization denominator ($E_s$) so when summing species those with higher extinction risk are given more weight.
-
-
-### Accounting for Area?
-
-The equation above is problematic because it biases equatorial cells and downweights poleward cells.
-
-$$
-E_s = \sum_{c=1}^{C} e_{s,c} * a_c \\
-R_{s,c} = \frac{ e_{s,c} * a_c}{ E_s} \\
-{RN\ R_c} = \sum_{s=1}^{S} R_{s,c} * e_{s,c}  * w_s
-$$
-
-What is 1?
-- Extinction risk ($w_s$): 1 = extinct, 0.8 = critically endangered, ...,  0.2 = least concern
-- Range normalization ($R_{s,c}$): smallest cell area * . OR use the smallest species range. That becomes 1, per species group, for comparing across groups. OR could change that with a species richness factor.
-
-Alternatively, we describe a range normalization factor per species ($N_s$) that can be applied to all cells ($C$) regardless of area relative to some minimum range size we define as 1.
-
-$$
-E_s = \sum_{c=1}^{C} e_{s,c} * a_c \\
-N_s = \frac{min\{E_1, ..., E_S\}}{E_s} \\
-NR_c = \sum_{s=1}^{S} e_{s,c}  * N_{s} * w_s
-$$
-
-
-- $E_s$: sum of environmental suitability across range, ie all cells, per species $_s$
-- $e_{s,c}$: AquaMap's Relative Environmental Suitability (RES; ranging in value [0, 1]) per species $_s$ and cell $_c$
-- $a_c$: area of cell $_c$
-- $C$: all cells
-- $N_s$: range normalization factor, per species $_s$
-- $\{E_1, ..., E_S\}$: set of species environmental suitability sums $E_s$ across all species $_S$
-- $NR_c$: range normalized species richness per cell $_c$, also weighted by extinction risk $w$
-- $w_s$: IUCN extinction risk weight of species
-
-Note that the (IUCN extinction risk) weight ($w_s$) is not part of the range normalization denominator ($E_s$) so when summing species those with higher extinction risk are given more weight.
-
 
 ```{r range normalize test}
 # species id's for right whale and blue whale
@@ -448,18 +421,44 @@ map_am_layer("sum")
 map_am_layer("sum RN")
 ```
 
-## Range Normalize Mammalia
+## Range Normalization, Regardless of Cell Area
 
-... in progress ...
+The equation above is problematic because it biases equatorial cells and downweights poleward cells. Another approach is to ask what does "1" mean per species richness factor?
 
-```{r range normalize mammalia, eval=F}
+- *Extinction risk* ($w_s$): 1 = extinct, 0.8 = critically endangered, ...,  0.2 = least concern
+
+- *Range normalization* ($N_s$): species normalization factor, based on the smallest species range within a given taxonomic group, eg Mammalia. 
+ 
+So alternatively, we describe a range normalization factor per species ($N_s$) that can be applied to all cells ($C$) regardless of the cell area (ie largest at equator, smallest at pole) relative to some minimum range size we define as 1.
+
+$$
+E_s = \sum_{c=1}^{C} e_{s,c} * a_c \\
+N_s = \frac{min\{E_1, ..., E_S\}}{E_s} \\
+NR_c = \sum_{s=1}^{S} e_{s,c}  * N_{s} * w_s
+$$
+
+
+- $E_s$: sum of environmental suitability across range, ie all cells, per species $_s$
+- $e_{s,c}$: AquaMap's Relative Environmental Suitability (RES; ranging in value [0, 1]) per species $_s$ and cell $_c$
+- $a_c$: area of cell $_c$
+- $C$: all cells
+- $N_s$: range normalization factor, per species $_s$
+- $\{E_1, ..., E_S\}$: set of species environmental suitability sums $E_s$ across all species $_S$
+- $NR_c$: range normalized species richness per cell $_c$, also weighted by extinction risk $w$
+- $w_s$: IUCN extinction risk weight of species
+
+## New Range Normalized Mammalia Richness
+
+Get species in Class "Mammalia" and IUCN extinction risk...
+
+```{r prep mammalia, eval=T}
 # species id's for right whale and blue whale
 # sid_blue  <- "ITS-Mam-180528"
 # sid_right <- "ITS-Mam-180537"
 
+library(rredlist)
 select = dplyr::select
 
-library(rredlist)
 get_iucn_category <- function(genus_species){
   # token issued to ben@ecoquants.com via http://apiv3.iucnredlist.org/api/v3/token
   rl_token <- "fb963555580923eb0f0b2778060e5bcbd0cca50c0b21c416ed7ff68da9c25c11"
@@ -475,42 +474,34 @@ get_iucn_category <- function(genus_species){
   } else {
     iucn_cat <- r$result$category
   }
-  cat(glue("{genus_species}: {iucn_cat}"), "\n")
+  #cat(glue("{genus_species}: {iucn_cat}"), "\n")
   
   iucn_cat
 }
+
+# bumping up LC to 0.2 to give credit for presence and not expecting extinct 1.2
+iucn_weights <- c(LC=0.2, NT=0.4, VU=0.6, EN=0.8, CR=1, EX=1.2)
 
 spp_g <- spp %>%
   filter(Class == "Mammalia") %>%
   arrange(Genus, Species) %>% 
   mutate(
     genus_species = glue("{Genus} {Species}"),
-    iucn_category = map_chr(genus_species, get_iucn_category)) %>%
-  arrange(genus_species)
-
-spp_g <- spp_g %>%
-  slice(which(spp_g$iucn_category == "NA")) %>%
-  mutate(
-    genus_species = glue("{Genus} {Species}"),
-    iucn_category = map_chr(genus_species, get_iucn_category))
-
-spp_g$iucn_category <- as.character(spp_g$iucn_category)
-table(spp_g$iucn_category)
-sum(is.na(spp_g$iucn_category))
+    iucn_category = map_chr(genus_species, get_iucn_category),
+    iucn_weight   = iucn_weights[iucn_category])
 
 spp_g %>%
-  slice(which(spp_g$iucn_category == "NA")) %>%
+  select(SPECIESID, FBname, genus_species, iucn_category, iucn_weight) %>%
+  DT::datatable()
 
-# IUCN extinction risk status
-ext_blue  <- "EN"
-ext_right <- "CR"
+table(spp_g$iucn_category, useNA = "ifany")
 
-# extinction risk weights
-# bumping up LC to 0.2 to give credit for presence and not expecting extinct 1.2
-ext_wts <- c(LC=0.2, NT=0.4, VU=0.6, EN=0.8, CR=1, EX=1.2)
-w_blue  <- ext_wts[ext_blue]
-w_right <- ext_wts[ext_right]
+iucn_weights
+```
 
+TODO: Range normalize across Mammalia based on latest equation using minimum species range as reference point.
+
+```{r range normalize mammalia, eval=F}
 get_am_raster <- function(sid, w=NULL, weight_area=T, range_normalize=T, attr_leaflet=T, extend_global=T){
   # Get AquaMaps raster
   # TODO: threshold param for binary output
@@ -739,16 +730,40 @@ map_am_layer("sum")
 map_am_layer("sum RN")
 ```
 
-#### TODO: Remove Land Area
 
-```{r}
-# calculate area of raster cells (km2)
-r_a <- area(r_na)
+## Observation Coverage
 
-# summarize and plot
-summary(values(r_a))
-plot(r_a)
-```
+Compare species ranges with available OBIS data to determine degree of coverage, especially for determining where we expect concentrations of endangered species and yet have no observational data.
+
+For example with North Atlantic Right Whale (__Eubalaena glacialis__):
+
+- [OBIS observations](http://iobis.org/mapper2/?taxonid=625064): 5695 records for _Eubalaena glacialis_
+
+  ![](img/obis-map_eubalaena-glacialis.png)
+
+- [AquaMaps Relative Env Suitability](https://www.aquamaps.org/preMap2.php?cache=1&SpecID=ITS-Mam-180537)
+
+  ![](https://www.aquamaps.org/imagethumb/workimagethumb.php?s=http://www.aquamaps.org/imagethumb/file_destination/exp_8_pic_ITS-Mam-180537.jpg&w=250)
+
+- [IUCN Range Map](http://maps.iucnredlist.org/map.html?id=41712)
+
+  ![](img/iucn-rangemap_eubalaena-glacialis.png)
+
+The topic of species home ranges is rich. Am keeping track of references in the mbon-indicators Zotero group, eg folder [species home ranges](https://www.zotero.org/groups/2202521/mbon-indicators/items/collectionKey/857EQ89A):
+
+* [Home range - Wikipedia](https://en.wikipedia.org/wiki/Home_range)
+* [adehabitatHR.pdf](https://cran.r-project.org/web/packages/adehabitatHR/vignettes/adehabitatHR.pdf)
+
+- Burgman, M. A., & Fox, J. C. (2003). Bias in species range estimates from minimum convex polygons: implications for conservation and options for improved planning. Animal Conservation, 6(1), 19–28. https://doi.org/10.1017/S1367943003003044
+Calenge, C. (n.d.). Home Range Estimation in R: the adehabitatHR Package, 61.
+- Elith, J., & Leathwick, J. R. (2009). Species Distribution Models: Ecological Explanation and Prediction Across Space and Time. Annual Review of Ecology, Evolution, and Systematics, 40(1), 677–697. https://doi.org/10.1146/annurev.ecolsys.110308.120159
+- Gaston, K. J., & Fuller, R. A. (2009). The sizes of species’ geographic ranges. Journal of Applied Ecology, 46(1), 1–9. https://doi.org/10.1111/j.1365-2664.2008.01596.x
+- Getz, W. M., Fortmann-Roe, S., Cross, P. C., Lyons, A. J., Ryan, S. J., & Wilmers, C. C. (2007). LoCoH: Nonparameteric Kernel Methods for Constructing Home Ranges and Utilization Distributions. PLoS ONE, 2(2), e207. https://doi.org/10.1371/journal.pone.0000207
+- Getz, W. M., & Wilmers, C. C. (2004). A local nearest-neighbor convex-hull construction of home ranges and utilization distributions. Ecography, 27(4), 489–505. https://doi.org/10.1111/j.0906-7590.2004.03835.x
+- Graham, C. H., & Hijmans, R. J. (2006). A comparison of methods for mapping species ranges and species richness. Global Ecology and Biogeography, 15(6), 578–587. https://doi.org/10.1111/j.1466-8238.2006.00257.x
+- Kearney, M., & Porter, W. (2009). Mechanistic niche modelling: combining physiological and spatial data to predict species’ ranges. Ecology Letters, 12(4), 334–350. https://doi.org/10.1111/j.1461-0248.2008.01277.x
+- Peterson, A. T. (2017). Problems with reductive, polygon-based methods for estimating species’ ranges: reply to Pimm et al. 2017: Estimating Species’ Ranges. Conservation Biology, 31(4), 948–951. https://doi.org/10.1111/cobi.12929
+
 
 ## Research
 
