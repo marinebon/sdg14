@@ -1,3 +1,7 @@
+#!/bin/bash
+#
+# Starts up docker & containers required to run the mbon explorer frontend & backend.
+# 
 # For background, see:
 #  marinebon/sdg14#4: load server software, a la MBON in a Box, using docker, RStudio Server, Shiny...
 #  https://github.com/marinebon/sdg14/issues/4
