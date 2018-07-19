@@ -33,6 +33,7 @@ spp_csv   <- file.path(dir_dat, "speciesoccursum_ver0816c.csv")
 obs_csv   <- file.path(dir_dat, "occurrencecells_ver0816c_head-100K-rows.csv")
 #cells_csv <- file.path(dir_dat, "hcaf_species_native_ver0816c_head-100K-rows.csv")
 cells_csv <- file.path(dir_dat, "hcaf_species_native_ver0816c.csv")
+env_csv   <- file.path(dir_dat, "hcaf_v6.csv")
 dir_spp   <- file.path(dir_dat, "species_rasters")
 
 spp   <- read_csv(spp_csv) # head(occ)
@@ -44,6 +45,14 @@ r_na <- raster(
   xmn = -180, xmx = 180, ymn = -90, ymx = 90, 
   resolution=0.5, crs=leaflet:::epsg4326)
 r_a <- area(r_na)
+
+r_1 <- setValues(r_na, 1)
+
+# writeRaster(r_a, path(dir_dat, "global_area.tif"))
+# writeRaster(r_1, path(dir_dat, "global_1.tif"))
+
+env <- read_delim(env_csv, delim = "\t")
+# TODO: use env.OceanArea for r_a
 ```
 
 ```{r helper functions}
@@ -115,6 +124,13 @@ file_info(dir_ls(dir_spp)) %>%
   pull(size) * 24904 / 1000000
 ```
 
+## Load into PostGIS DB
+
+```bash
+gdal2wktraster.py -r C:\Temp\TutData\SRTM\tif\*.tif -t srtm_tiled 
+      -s 4326 -k 60x60 -I > C:\Temp\TutData\SRTM\srtm.sql
+```
+
 ## Range Normalized Cumulative Species Map
 
 To demonstrate the methodology of "range normalization", let's compare a cumulative species map with and without range normalization for two species with very different ranges:
@@ -154,7 +170,42 @@ $$
 Note that the (IUCN extinction risk) weight ($w_s$) is not part of the range normalization denominator ($E_s$) so when summing species those with higher extinction risk are given more weight.
 
 
-```{r range normalize}
+### Accounting for Area?
+
+The equation above is problematic because it biases equatorial cells and downweights poleward cells.
+
+$$
+E_s = \sum_{c=1}^{C} e_{s,c} * a_c \\
+R_{s,c} = \frac{ e_{s,c} * a_c}{ E_s} \\
+{RN\ R_c} = \sum_{s=1}^{S} R_{s,c} * e_{s,c}  * w_s
+$$
+
+What is 1?
+- Extinction risk ($w_s$): 1 = extinct, 0.8 = critically endangered, ...,  0.2 = least concern
+- Range normalization ($R_{s,c}$): smallest cell area * . OR use the smallest species range. That becomes 1, per species group, for comparing across groups. OR could change that with a species richness factor.
+
+Alternatively, we describe a range normalization factor per species ($N_s$) that can be applied to all cells ($C$) regardless of area relative to some minimum range size we define as 1.
+
+$$
+E_s = \sum_{c=1}^{C} e_{s,c} * a_c \\
+N_s = \frac{min\{E_1, ..., E_S\}}{E_s} \\
+NR_c = \sum_{s=1}^{S} e_{s,c}  * N_{s} * w_s
+$$
+
+
+- $E_s$: sum of environmental suitability across range, ie all cells, per species $_s$
+- $e_{s,c}$: AquaMap's Relative Environmental Suitability (RES; ranging in value [0, 1]) per species $_s$ and cell $_c$
+- $a_c$: area of cell $_c$
+- $C$: all cells
+- $N_s$: range normalization factor, per species $_s$
+- $\{E_1, ..., E_S\}$: set of species environmental suitability sums $E_s$ across all species $_S$
+- $NR_c$: range normalized species richness per cell $_c$, also weighted by extinction risk $w$
+- $w_s$: IUCN extinction risk weight of species
+
+Note that the (IUCN extinction risk) weight ($w_s$) is not part of the range normalization denominator ($E_s$) so when summing species those with higher extinction risk are given more weight.
+
+
+```{r range normalize test}
 # species id's for right whale and blue whale
 sid_blue  <- "ITS-Mam-180528"
 sid_right <- "ITS-Mam-180537"
@@ -397,8 +448,296 @@ map_am_layer("sum")
 map_am_layer("sum RN")
 ```
 
+## Range Normalize Mammalia
 
-### Accounting for Area
+... in progress ...
+
+```{r range normalize mammalia, eval=F}
+# species id's for right whale and blue whale
+# sid_blue  <- "ITS-Mam-180528"
+# sid_right <- "ITS-Mam-180537"
+
+select = dplyr::select
+
+library(rredlist)
+get_iucn_category <- function(genus_species){
+  # token issued to ben@ecoquants.com via http://apiv3.iucnredlist.org/api/v3/token
+  rl_token <- "fb963555580923eb0f0b2778060e5bcbd0cca50c0b21c416ed7ff68da9c25c11"
+  
+  #genus_sp <- 'Balaenoptera brydei'
+  #genus_sp <- "Mesoplodon hectori"
+  #genus_sp <- "Mesoplodon hectori"
+  
+  r <- rl_search(genus_species, key=rl_token)
+  #browser()
+  if (is_empty(r$result)){
+    iucn_cat <- NA
+  } else {
+    iucn_cat <- r$result$category
+  }
+  cat(glue("{genus_species}: {iucn_cat}"), "\n")
+  
+  iucn_cat
+}
+
+spp_g <- spp %>%
+  filter(Class == "Mammalia") %>%
+  arrange(Genus, Species) %>% 
+  mutate(
+    genus_species = glue("{Genus} {Species}"),
+    iucn_category = map_chr(genus_species, get_iucn_category)) %>%
+  arrange(genus_species)
+
+spp_g <- spp_g %>%
+  slice(which(spp_g$iucn_category == "NA")) %>%
+  mutate(
+    genus_species = glue("{Genus} {Species}"),
+    iucn_category = map_chr(genus_species, get_iucn_category))
+
+spp_g$iucn_category <- as.character(spp_g$iucn_category)
+table(spp_g$iucn_category)
+sum(is.na(spp_g$iucn_category))
+
+spp_g %>%
+  slice(which(spp_g$iucn_category == "NA")) %>%
+
+# IUCN extinction risk status
+ext_blue  <- "EN"
+ext_right <- "CR"
+
+# extinction risk weights
+# bumping up LC to 0.2 to give credit for presence and not expecting extinct 1.2
+ext_wts <- c(LC=0.2, NT=0.4, VU=0.6, EN=0.8, CR=1, EX=1.2)
+w_blue  <- ext_wts[ext_blue]
+w_right <- ext_wts[ext_right]
+
+get_am_raster <- function(sid, w=NULL, weight_area=T, range_normalize=T, attr_leaflet=T, extend_global=T){
+  # Get AquaMaps raster
+  # TODO: threshold param for binary output
+  # sid: species id # sid <- sid_right
+  # sid=sid_right; weight_area=T; range_normalize=T; attr_leaflet=T; extend_global=T; w=w_right
+  
+  # read tif
+  tif <- glue("{dir_spp}/{sid}.tif")
+  r <- raster(tif, crs=leaflet:::epsg4326)
+  
+  # set boundaries
+  b <- extent(r)
+  
+  a = "attributes" # names(attributes(r)) # names(attributes(a))
+  attr(a, "bounds") <- list(lng1 = b@xmin, lat1 = b@ymin, lng2 = b@xmax, lat2 = b@ymax) 
+
+  # extend to global for calculations
+  r <- extend(r, r_na)
+  
+  attr(a, "cell_avg_e") = cellStats(r, "mean", na.rm=T)
+  attr(a, "sum_e") <- cellStats(r, stat='sum', na.rm=T)
+  
+  if (weight_area){
+    r <- r * r_a
+    
+    attr(a, "cell_avg_e_a") = cellStats(r, "mean", na.rm=T)
+    attr(a, "sum_area_km2")   <- cellStats(mask(r_a, r), stat='sum', na.rm=T)
+    attr(a, "sum_e_area_km2") <- cellStats(r, stat='sum', na.rm=T)
+  }
+  
+  if (range_normalize){
+    E_s <- ifelse(weight_area, attr(a, "sum_e_area_km2"), attr(a, "sum_e"))
+    r <- r / E_s
+    
+    attr(a, "E_s") <- ifelse(weight_area, "sum_e_area_km2", "sum_e")
+    attr(a, "cell_avg_e_a_Es") = cellStats(r, "mean", na.rm=T)
+  }
+  
+  if (!is.null(w)){
+    r <- r * w
+    
+    attr(a, "w") <- w
+    attr(a, "cell_avg_w") = cellStats(r, "mean", na.rm=T)
+  }
+  
+  attr(a, "cell_avg") = cellStats(r, "mean", na.rm=T)
+  
+  if (attr_leaflet){
+    r_leaflet <- projectRasterForLeaflet(raster_trim(r), method="ngb")
+    attr(a, "r_leaflet") <- r_leaflet 
+  }
+  
+  if (!extend_global)
+    r <- raster_trim(r)
+
+  # append attributes  
+  walk(names(attributes(a)), function(x){
+    attr(r, x) <- attributes(a)[[x]]
+    assign("r", r, pos = parent.frame(n=2), inherits = FALSE)})
+  #names(attributes(a))
+  #names(attributes(r))
+  
+  r
+}
+
+# rasters for species relative environmental suitability [0 - 1]
+r_right <-  get_am_raster(sid_right, weight_area=F, range_normalize=F) # plot(r_right)
+r_blue  <-  get_am_raster(sid_blue, weight_area=F, range_normalize=F)   # plot(r_blue)
+r_right_w_a_r <-  get_am_raster(sid_right, w=w_right, weight_area=T, range_normalize=T) # plot(r_right)
+r_blue_w_a_r  <-  get_am_raster(sid_blue, w=w_blue, weight_area=T, range_normalize=T)   # plot(r_blue)
+
+# names(attributes(r_right))
+# attr(r_blue, "cell_avg")
+# attr(r_right, "cell_avg")
+# attr(r_right, "sum_area_km2")
+
+sum_am_rasters <- function(..., attr_leaflet=T){
+#add_am_rasters <- function(..., spp_wts=NULL, spp_range_normalize=T, spp_all_normalize=T){
+  # spp_range_normalize: for each species map, divide by sum of all pixels, before summing
+  # spp_all_normalize: after summing all species maps, divide by max pixel value to get range [0,1]
+  # spp_wts: species weights, to apply in same order as rasters. defaults to 1
+  # TODO: add species richness factor, so more species -> stronger result
+  # ...: rasters
+  
+  rasters <- list(...)
+  s <- stack(rasters)
+  
+  # if (!is.null(spp_wts)){
+  #   stopifnot(length(rasters)==length(spp_wts))
+  #   for (i in 1:length(spp_wts))
+  #     s[[i]] <- raster(s, layer=i) *  spp_wts[i]
+  # } #else {
+    #spp_wts = rep(1, length(rasters))
+  #}
+    
+  # spp_wts <- ext_wts[c(ext_right, ext_blue)]
+  
+  # get weighted mean
+  #r <- weighted.mean(s, spp_wts)
+  
+  # sum across all species rasters
+  #r <- calc(s, function(x) )
+  #r <- calc(s, fun = sum, na.rm = T)
+  r <- sum(s, na.rm = T)
+  #plot(raster(s, layer=1), col=rev(rainbow(255)))
+  
+  # mask
+  m <- overlay(s, fun=function(x) ifelse(sum(!is.na(x)) > 0, 1, NA))
+  r <- mask(r, m)
+  
+  # trim
+  #r <- 
+  #summary(r); plot(r, col=rev(rainbow(255)))
+  #summary(r0); plot(r0, col=rev(rainbow(255)))
+  #summary(r0); plot(stack, r0)
+  #r <- calc(s, fun = sum, na.rm = T)
+  #summary(r0)
+  
+  # if (spp_all_normalize)
+  #   r <- r / cellStats(r, stat='max', na.rm=T)
+  
+  # project for leaflet
+  if (attr_leaflet)
+    attr(r, "r_leaflet")  <- projectRasterForLeaflet(raster_trim(r), method="ngb")
+  
+  r
+}
+
+#r_sum   <- add_am_rasters(r_right, r_blue, spp_range_normalize=F, spp_all_normalize=F, spp_wts = NULL)
+#r_nrsum <- add_am_rasters(r_right, r_blue, spp_range_normalize=T, spp_all_normalize=F, spp_wts = NULL)
+r_sum   <- sum_am_rasters(r_right, r_blue) # plot(r_sum)
+r_nrsum <- sum_am_rasters(r_right_w_a_r, r_blue_w_a_r)
+
+#plot(r_sum)
+#plot(r_nrsum)
+#r_add3 <- add_am_rasters(r_right, r_blue, spp_range_normalize=T, spp_all_normalize=T, spp_wts = NULL)
+#r_add4 <- add_am_rasters(r_right, r_blue, spp_range_normalize=T, spp_all_normalize=T, 
+#                         spp_wts = ext_wts[c(ext_right, ext_blue)])
+
+# summary(r_sum)
+# summary(r_nrsum)
+# summary(r_add3)
+# summary(r_add4)
+
+fit_am_raster <- function(map, r){
+  bounds <- attr(r, "bounds")
+  with(bounds, fitBounds(map, lng1, lat1, lng2, lat2))
+}
+
+add_am_raster <- function(m, r, lyr_name, r_type="spp"){
+  # r_type="spp" or "sum"
+  # r <- r_right
+  r <- attr(r, "r_leaflet")
+  
+  max_r <- cellStats(r, stat='max', na.rm=T)
+  sum_r <- cellStats(r, stat='sum', na.rm=T)
+
+  rng <- c(0, 1)
+  if (r_type != "spp"){
+    rng <- c(0, max_r)
+  }
+  
+  pal <- colorNumeric(
+    "inferno", rng, na.color = "transparent", reverse=T)
+
+  lab_sci <- function(v, type="numeric"){
+    #browser()
+    if (r_type == "spp"){
+      labs <- case_when(
+        v == 0 ~ "0, 0",
+        v == last(v) ~ as.character(glue(
+          "{v}, {formatC(v/sum_r, format = 'e', digits = 1)}")),
+        TRUE ~ "")
+    } else {
+      #if (lyr_name == "sum NR RES") browser()
+      labs <- case_when(
+        v == 0 ~ "0, 0",
+        v == last(v) ~ as.character(glue(
+          "{v}, 1")),
+        TRUE ~ "")
+    }
+    labs
+  }
+  
+  m %>%
+    addRasterImage(
+      r, colors = pal, opacity = 0.6, project=F, 
+      group=lyr_name) %>%
+    addLegend(
+      group = lyr_name, pal = pal,
+      position = "bottomright",
+      values = rng, labFormat = lab_sci,
+      title = ifelse(
+        r_type == "spp",
+        glue("{lyr_name} (RES, E_s)<br>&nbsp;&nbsp;sum={format(sum_r, big.mark=',', digits=1, nsmall=1)}"),
+        glue("{lyr_name} (max, 1)")))
+}
+
+map_am_layer <- function(lyr){
+  
+  m <- leaflet() %>%
+    addProviderTiles(
+      providers$Esri.OceanBasemap, options=providerTileOptions(opacity=0.6)) %>%
+    add_am_raster(r_right, "right whale") %>%
+    add_am_raster(r_blue, "blue whale") %>%
+    add_am_raster(r_sum, "sum", r_type="sum") %>%
+    add_am_raster(r_nrsum, "sum RN", r_type="sum") %>%
+    addLayersControl(
+      baseGroups = c("ESRI Ocean Basemap"),
+      overlayGroups = c("right whale", "blue whale", "sum", "sum RN"),
+      #overlayGroups = c("right whale", "blue whale", "sum"),
+      options = layersControlOptions(collapsed = T)) %>%
+    fit_am_raster(r_blue) %>%
+    addMiniMap(position = "bottomleft", toggleDisplay = T, minimized = T) %>%
+    hideGroup("blue whale") %>%
+    hideGroup("right whale") %>%
+    hideGroup("sum") %>%
+    hideGroup("sum RN") %>%
+    showGroup(lyr)
+  m
+}
+
+map_am_layer("blue whale")
+map_am_layer("right whale")
+map_am_layer("sum")
+map_am_layer("sum RN")
+```
 
 #### TODO: Remove Land Area
 
