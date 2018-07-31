@@ -50,8 +50,9 @@ vi web.xml
 #    <url-pattern>/*</url-pattern>
 #  </filter-mapping>
 
-
-
+# =============
+# from https://github.com/marinebon/sdg14/blob/0960584fd7a8334ddf58be812446acdbbc87588e/satellite/satellite_prep.R
+# =============
 # TODO: create dir_out parameter files for GeoServer
 # * [Using the ImageMosaic plugin for raster time-series data — GeoServer 2.12.x User Manual](http://docs.geoserver.org/stable/en/user/tutorials/imagemosaic_timeseries/imagemosaic_timeseries.html)
 # * [Tile Caching with GeoWebCache — GeoServer Training](http://geoserver.geo-solutions.it/edu/en/enterprise/gwc.html)
