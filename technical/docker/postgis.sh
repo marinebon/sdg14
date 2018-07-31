@@ -22,3 +22,9 @@ docker exec postgis cp -f /mbon-local/postgresql.conf /etc/postgresql/9.5/.
 
 # restart postgres to load config changes
 docker exec postgis service postgresql restart
+
+# install postgresql studio plugin
+docker exec geoserver bash -c '\
+  cd /usr/local/tomcat/webapps; \
+  wget http://downloads.postgresqlstudio.org/2.0/pgstudio_2.0.zip; \
+  unzip pgstudio_2.0.zip'
