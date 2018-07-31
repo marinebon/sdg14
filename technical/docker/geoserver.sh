@@ -37,6 +37,18 @@ cd /usr/local/tomcat/webapps/geoserver/WEB-INF
 apt-get install vim # install vi
 vi web.xml
 
+
+# [Installing the JDBC Image Mosaic extension](http://docs.geoserver.org/stable/en/user/data/raster/imagemosaicjdbc.html#imagemosaicjdbc-install)
+docker exec -it geoserver bash
+
+cd /usr/local/tomcat/webapps/geoserver/WEB-INF/lib
+wget -O geoserver-2.12.0-imagemosaic-jdbc-plugin.zip https://downloads.sourceforge.net/project/geoserver/GeoServer/2.12.0/extensions/geoserver-2.12.0-imagemosaic-jdbc-plugin.zip?r=https%3A%2F%2Fsourceforge.net%2Fprojects%2Fgeoserver%2Ffiles%2FGeoServer%2F2.12.0%2Fextensions%2Fgeoserver-2.12.0-imagemosaic-jdbc-plugin.zip%2Fdownload&ts=1533056079
+unzip geoserver-2.12.0-imagemosaic-jdbc-plugin.zip
+
+wget -O geoserver-2.12.0-pyramid-plugin.zip https://downloads.sourceforge.net/project/geoserver/GeoServer/2.12.0/extensions/geoserver-2.12.0-pyramid-plugin.zip?r=https%3A%2F%2Fsourceforge.net%2Fprojects%2Fgeoserver%2Ffiles%2FGeoServer%2F2.12.0%2Fextensions%2Fgeoserver-2.12.0-pyramid-plugin.zip%2Fdownload&ts=1533056600
+unzip geoserver-2.12.0-pyramid-plugin.zip
+
+
 # Uncomment following sections in web.xml:
 # <!-- Uncomment following filter to enable CORS -->
 #  <filter>
