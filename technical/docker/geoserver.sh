@@ -49,3 +49,9 @@ vi web.xml
 #    <filter-name>cross-origin</filter-name>
 #    <url-pattern>/*</url-pattern>
 #  </filter-mapping>
+
+
+
+# TODO: create dir_out parameter files for GeoServer
+# * [Using the ImageMosaic plugin for raster time-series data — GeoServer 2.12.x User Manual](http://docs.geoserver.org/stable/en/user/tutorials/imagemosaic_timeseries/imagemosaic_timeseries.html)
+# * [Tile Caching with GeoWebCache — GeoServer Training](http://geoserver.geo-solutions.it/edu/en/enterprise/gwc.html)
