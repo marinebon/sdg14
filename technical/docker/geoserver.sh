@@ -37,6 +37,18 @@ cd /usr/local/tomcat/webapps/geoserver/WEB-INF
 apt-get install vim # install vi
 vi web.xml
 
+
+# [Installing the JDBC Image Mosaic extension](http://docs.geoserver.org/stable/en/user/data/raster/imagemosaicjdbc.html#imagemosaicjdbc-install)
+docker exec -it geoserver bash
+
+cd /usr/local/tomcat/webapps/geoserver/WEB-INF/lib
+wget -O geoserver-2.12.0-imagemosaic-jdbc-plugin.zip https://downloads.sourceforge.net/project/geoserver/GeoServer/2.12.0/extensions/geoserver-2.12.0-imagemosaic-jdbc-plugin.zip?r=https%3A%2F%2Fsourceforge.net%2Fprojects%2Fgeoserver%2Ffiles%2FGeoServer%2F2.12.0%2Fextensions%2Fgeoserver-2.12.0-imagemosaic-jdbc-plugin.zip%2Fdownload&ts=1533056079
+unzip geoserver-2.12.0-imagemosaic-jdbc-plugin.zip
+
+wget -O geoserver-2.12.0-pyramid-plugin.zip https://downloads.sourceforge.net/project/geoserver/GeoServer/2.12.0/extensions/geoserver-2.12.0-pyramid-plugin.zip?r=https%3A%2F%2Fsourceforge.net%2Fprojects%2Fgeoserver%2Ffiles%2FGeoServer%2F2.12.0%2Fextensions%2Fgeoserver-2.12.0-pyramid-plugin.zip%2Fdownload&ts=1533056600
+unzip geoserver-2.12.0-pyramid-plugin.zip
+
+
 # Uncomment following sections in web.xml:
 # <!-- Uncomment following filter to enable CORS -->
 #  <filter>
@@ -49,3 +61,10 @@ vi web.xml
 #    <filter-name>cross-origin</filter-name>
 #    <url-pattern>/*</url-pattern>
 #  </filter-mapping>
+
+# =============
+# from https://github.com/marinebon/sdg14/blob/0960584fd7a8334ddf58be812446acdbbc87588e/satellite/satellite_prep.R
+# =============
+# TODO: create dir_out parameter files for GeoServer
+# * [Using the ImageMosaic plugin for raster time-series data — GeoServer 2.12.x User Manual](http://docs.geoserver.org/stable/en/user/tutorials/imagemosaic_timeseries/imagemosaic_timeseries.html)
+# * [Tile Caching with GeoWebCache — GeoServer Training](http://geoserver.geo-solutions.it/edu/en/enterprise/gwc.html)
