@@ -457,6 +457,7 @@ Get species in Class "Mammalia" and IUCN extinction risk...
 # sid_blue  <- "ITS-Mam-180528"
 # sid_right <- "ITS-Mam-180537"
 
+library(scales)
 library(rredlist)
 select = dplyr::select
 
@@ -504,21 +505,6 @@ if (!file.exists(spp_csv) | redo_spp_g){
 }
 spp_g <- read_csv(spp_csv)
 
-spp_g %>%
-  select(SPECIESID, FBname, genus_species, iucn_category, iucn_weight) %>%
-  DT::datatable()
-
-table(spp_g$iucn_category, useNA = "ifany")
-
-iucn_weights
-```
-
-TODO: Range normalize across Mammalia based on latest equation using minimum species range as reference point.
-
-```{r range normalize mammalia, eval=T}
-library(DT)
-library(scales)
-
 # get raster stack of species, extended to globe
 s_g <- stack(sapply(spp_g$tif, function(tif) raster(tif, crs=leaflet:::epsg4326) %>% extend(r_na)))
 names(s_g) <- spp_g$SPECIESID
@@ -540,6 +526,24 @@ spp_g <- spp_g %>%
     sum_area_km2   = map_dbl(stack_name, get_spp_stat, s_g, "sum_area_km2"),
     rescale_RES    = rescale(1/sum_RES),
     logrescale_RES = rescale(1/log(sum_RES)))
+
+write_csv(spp_g, spp_csv)
+spp_g <- read_csv(spp_csv)
+
+spp_g %>%
+  select(SPECIESID, FBname, genus_species, iucn_category, iucn_weight, sum_area_km2, sum_RES, rescale_RES, logrescale_RES) %>%
+  DT::datatable()
+
+table(spp_g$iucn_category, useNA = "ifany")
+
+iucn_weights
+```
+
+TODO: Range normalize across Mammalia based on latest equation using minimum species range as reference point.
+
+```{r range normalize mammalia, eval=T}
+library(DT)
+
 hist(spp_g$sum_RES)
 hist(spp_g$rescale_RES)
 hist(spp_g$logrescale_RES)
