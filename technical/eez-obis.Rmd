@@ -303,6 +303,28 @@ UPDATE obis_occ_10k SET eez_territory = e.territory1
     AND ST_INTERSECTS(o.geog::geometry, e.geog::geometry));')
   }) # 3.5 min
 
+dbSendQuery(con, 'ALTER TABLE obis_occ_10k ADD COLUMN eez_territory varchar(80);')
+system.time({
+  dbSendQuery(con, '
+UPDATE obis_occ_10k SET eez_territory = e.territory1
+  FROM obis_occ_10k AS o
+    INNER JOIN eez_s005 AS e
+    ON (o.geog::geometry && e.geog::geometry
+    AND ST_INTERSECTS(o.geog::geometry, e.geog::geometry));')
+  }) # 3.5 min
+
+
+
+
+system.time({
+  dbSendQuery(con, '
+UPDATE obis_occ_10k SET eez_territory = e.territory1
+  FROM obis_occ_10k AS o
+    INNER JOIN eez_s005 AS e
+    ON (o.geog::geometry && e.geog::geometry
+    AND ST_INTERSECTS(o.geog::geometry, e.geog::geometry));')
+  })
+
 o = st_read_db(con, query='SELECT * FROM obis_occ_10k', geom_column='geog') # table='obis_occ_10k') # query='SELECT * FROM obis_occ_10k')
 table(o$eez_territory)
 # American Samoa 
@@ -361,8 +383,17 @@ UPDATE obis_occ AS pts SET eez_territory = 'Spain'
   WHERE ST_INTERSECTS(pts.geog::geometry, ply.geog::geometry);") # WHERE ST_Contains(e.geog::geometry, o.geog::geometry);')
   }) # 57/54/61 for && /10 for Spain
 
-#WHERE pts.geog::geometry && ply.geog::geometry AND
+# https://github.com/marinebon/sdg14-shiny/issues/4
+# \timing
+# UPDATE obis_occ SET eez_territory = NULL;  
+# UPDATE obis_occ AS o SET eez_territory = t.eez_territory
+#   FROM (
+#     SELECT Territory1 AS obis_pkey, eez_territory
+#     FROM obis_occ AS o, eez AS e
+#     WHERE ST_INTERSECTS(o.geom, e.geom)) AS t
+#   WHERE o.obis_pkey = t.obis_pkey;
 
+  
 o = st_read_db(con, query='SELECT * FROM obis_occ_10k', geom_column='geog') # table='obis_occ_10k') # query='SELECT * FROM obis_occ_10k')
 o = st_read_db(con, query="SELECT * FROM obis_occ_10k WHERE eez_territory = 'Spain'", geom_column='geog') # table='obis_occ_10k') # query='SELECT * FROM obis_occ_10k')
 table(o$eez_territory)
