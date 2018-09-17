@@ -28,14 +28,15 @@ library(leaflet)
 
 # dir & csv's
 #dir_dat   <- "/Users/bbest/Desktop/aquamaps_ver0816c"
-dir_dat   <- "/Volumes/Best HD/mbon_data_big/aquamaps"
-spp_csv   <- file.path(dir_dat, "speciesoccursum_ver0816c.csv")
-obs_csv   <- file.path(dir_dat, "occurrencecells_ver0816c_head-100K-rows.csv")
+dir_dat    <- "/Volumes/Best HD/mbon_data_big/aquamaps"
+spp_csv    <- file.path(dir_dat, "speciesoccursum_ver0816c.csv")
+spp_aq_csv <- file.path(dir_dat, "speciesoccursum_ver0816c.csv")
+obs_csv    <- file.path(dir_dat, "occurrencecells_ver0816c_head-100K-rows.csv")
 #cells_csv <- file.path(dir_dat, "hcaf_species_native_ver0816c_head-100K-rows.csv")
-cells_csv <- file.path(dir_dat, "hcaf_species_native_ver0816c.csv")
-env_csv   <- file.path(dir_dat, "hcaf_v6.csv")
-spp_csv   <- file.path(dir_dat, "spp.csv")
-dir_spp   <- file.path(dir_dat, "species_rasters")
+cells_csv  <- file.path(dir_dat, "hcaf_species_native_ver0816c.csv")
+env_csv    <- file.path(dir_dat, "hcaf_v6.csv")
+spp_g_csv  <- file.path(dir_dat, "spp_g.csv")
+dir_spp    <- file.path(dir_dat, "species_rasters")
 
 spp <- read_csv(spp_csv) # head(occ)
 #cells <- read_csv(cells_csv)
@@ -489,7 +490,7 @@ get_iucn_category <- function(genus_species){
 iucn_weights <- c(LC=0.2, NT=0.4, VU=0.6, EN=0.8, CR=1, EX=1.2)
 
 redo_spp_g <- F
-if (!file.exists(spp_csv) | redo_spp_g){
+if (!file.exists(spp_g_csv) | redo_spp_g){
   spp_g <- spp %>%
     filter(Class == "Mammalia") %>%
     arrange(Genus, Species) %>% 
@@ -501,9 +502,9 @@ if (!file.exists(spp_csv) | redo_spp_g){
       tif           = glue("{dir_spp}/{SPECIESID}.tif"),
       stack_name    = str_replace_all(SPECIESID, "-", "."))
   
-  write_csv(spp_g, spp_csv)
+  write_csv(spp_g, spp_g_csv)
 }
-spp_g <- read_csv(spp_csv)
+spp_g <- read_csv(spp_g_csv)
 
 # get raster stack of species, extended to globe
 s_g <- stack(sapply(spp_g$tif, function(tif) raster(tif, crs=leaflet:::epsg4326) %>% extend(r_na)))
@@ -527,8 +528,8 @@ spp_g <- spp_g %>%
     rescale_RES    = rescale(1/sum_RES),
     logrescale_RES = rescale(1/log(sum_RES)))
 
-write_csv(spp_g, spp_csv)
-spp_g <- read_csv(spp_csv)
+write_csv(spp_g, spp_g_csv)
+spp_g <- read_csv(spp_g_csv)
 
 spp_g %>%
   select(SPECIESID, FBname, genus_species, iucn_category, iucn_weight, sum_area_km2, sum_RES, rescale_RES, logrescale_RES) %>%
