@@ -7,7 +7,7 @@ output:
     code_folding: hide
     toc: true
     toc_float: true
-editor_options: 
+editor_options:
   chunk_output_type: console
 ---
 
@@ -24,8 +24,7 @@ library(tidyverse)
 library(glue)
 library(fs)
 library(raster)
-#rasterOptions(chunksize = 1e+07, maxmemory = 1e+09)
-rasterOptions(chunksize = 1e+09, maxmemory = 1e+11)
+rasterOptions(maxmemory = 1e+10)
 select = dplyr::select
 library(leaflet)
 library(scales)
@@ -34,13 +33,21 @@ library(future)
 values = raster::values
 plan(multiprocess)
 
+# TODO: parallelize stack operations, esp sum_am_stack
+# no_cores <- parallel::detectCores() - 1
+# raster::beginCluster(no_cores)
+# myFun <- function(x, ...) {
+#   mean(!is.na(x))
+# }
+# r_week <- raster::clusterR(r, stackApply, args=list(indices = indices, fun = myFun, na.rm = TRUE))
+# raster::endCluster()
+
 # token issued to ben@ecoquants.com via http://apiv3.iucnredlist.org/api/v3/token
 Sys.setenv(IUCN_REDLIST_KEY = read_lines("~/.iucn_api_key"))
 
 # dir & csv's
 #dir_dat   <- "/Users/bbest/Desktop/aquamaps_ver0816c"
 dir_dat    <- "/Volumes/Best HD/mbon_data_big/aquamaps"
-dir_local  <- "/Users/bbest/github/sdg14-shiny/am-ranges/data/groups"
 spp_csv    <- file.path(dir_dat, "speciesoccursum_ver0816c.csv")
 spp_aq_csv <- file.path(dir_dat, "speciesoccursum_ver0816c.csv")
 obs_csv    <- file.path(dir_dat, "occurrencecells_ver0816c_head-100K-rows.csv")
@@ -57,7 +64,7 @@ spp <- read_csv(spp_csv) # head(occ)
 
 # AquaMaps raster specifications for 0.5 degree global raster
 r_na <- raster(
-  xmn = -180, xmx = 180, ymn = -90, ymx = 90, 
+  xmn = -180, xmx = 180, ymn = -90, ymx = 90,
   resolution=0.5, crs=leaflet:::epsg4326)
 r_a <- area(r_na)
 
@@ -76,7 +83,7 @@ iucn_weights <- c(`NA`=0.2, DD=0.2, LC=0.2, NT=0.4, VU=0.6, EN=0.8, CR=1, EX=1.2
 ```{r helper functions}
 raster_trim <- function(r){
   # source: /Users/bbest/github/nrelutils/R/raster_utils.R
-  
+
   # raster::trim() crazy slow compared to this
   r_m          <- is.na(raster::as.matrix(r))
   col_notna    <- which(colSums(r_m) != nrow(r))
@@ -90,18 +97,18 @@ raster_trim <- function(r){
 
 sp_id_to_tif <- function(sp_id){
   # , cells=cells, r_na=r_na, dir_spp=dir_spp
-  
+
   # get cells
   cells_sp <- cells %>%
     filter(SpeciesID == sp_id) %>%
     mutate(
       cell = cellFromXY(r_na, matrix(data = c(CenterLong, CenterLat), ncol=2)))
-  
+
   # assign to raster
   r_sp <- r_na
   r_sp[cells_sp$cell] <- cells_sp$probability
   r_sp <- raster_trim(r_sp) # plot(r_sp)
-  
+
   # write out
   r_sp_tif <- glue("{dir_spp}/{sp_id}.tif")
   writeRaster(r_sp, r_sp_tif, overwrite=T)
@@ -111,11 +118,11 @@ get_iucn_category <- function(genus_species){
   # token issued to ben@ecoquants.com via http://apiv3.iucnredlist.org/api/v3/token
   rl_token <- "fb963555580923eb0f0b2778060e5bcbd0cca50c0b21c416ed7ff68da9c25c11"
   #genus_species <- spp_g$genus_species[1]
-  
+
   #genus_sp <- 'Balaenoptera brydei'
   #genus_sp <- "Mesoplodon hectori"
   #genus_sp <- "Mesoplodon hectori"
-  
+
   r <- rl_search(genus_species, key=rl_token)
   # r <- rl_search_(name=genus_species, id=NULL, region=NULL, key=rl_token)
   # r <- rredlist:::rr_GET(rredlist:::nir("species", "species/id", name=genus_species, id=NULL, region=NULL), id=NULL, region=NULL, key=rl_token)
@@ -128,12 +135,12 @@ get_iucn_category <- function(genus_species){
   }
   #cat(glue("{genus_species}: {iucn_cat}"), "\n")
   if (!iucn_cat %in% names(iucn_weights)) warning(glue("  {genus_species} iucn_cat {iucn_cat} not defined!", .trim=F), immediate. = T)
-  
+
   iucn_cat
 }
 
 get_spp_stat <- function(stack_name, s, stat="sum_RES"){
-  #stack_name <- spp_g$r[1] 
+  #stack_name <- spp_g$r[1]
   r <- raster(s, stack_name)
   if (stat == "sum_RES"){
     cellStats(r, stat = "sum")
@@ -152,46 +159,23 @@ sum_am_stack <- function(s, spp, do_rel=T, do_ext=T, do_rng=T, do_sca=T, binary_
   # do_ext = T # extinction risk
   # do_rng = T # range contraction, ie endemism
   # do_sca = T # final rescale [0-1]
-  
-  lyrs <- names(s)
-  
-  # do_rel: relative environmental suitability, otherwise binary
+
+  # do_res: relative environmental suitability, otherwise binary
   if (!do_rel){
     v_to_binary <- function(v, na.rm=T){
       if (is.na(v)) return(NA)
       ifelse(v >= binary_threshold, 1, NA)
     }
-    
-    
-    # TODO: parallelize stack operations, esp sum_am_stack
-# no_cores <- parallel::detectCores() - 1
-# raster::beginCluster(no_cores)
-# myFun <- function(x, ...) {
-#   mean(!is.na(x))
-# }
-# r_week <- raster::clusterR(r, stackApply, args=list(indices = indices, fun = myFun, na.rm = TRUE))
-# raster::endCluster()
-    
-    #s <- stackApply(s, 1:nlayers(s), v_to_binary)
-    # m1 <- system.time({ s1 <- stackApply(s, 1:nlayers(s), v_to_binary) })
-    # cat(m1)
-    # m2 <- system.time({
-    #   raster::beginCluster()
-    #   s2 <- raster::clusterR(s, stackApply, args=list(indices = 1:nlayers(s), fun = v_to_binary, na.rm = T))
-    #   raster::endCluster() })
-    # cat(m2)
-    #browser()
-    raster::beginCluster()
-    s <- raster::clusterR(s, stackApply, args=list(indices = 1:nlayers(s), fun = v_to_binary, na.rm = T))
-    raster::endCluster()
-    names(s) <- lyrs
+
+    s <- stackApply(s, 1:nlayers(s), v_to_binary)
+    names(s) <- names(s)
   }
-  
+
   # do_ext: extinction risk
   if (do_ext){
     s <- s * spp$iucn_weight
   }
-  
+
   # do_rng: range contraction, ie endemism
   if (do_rng){
     if (log_rng){
@@ -200,23 +184,18 @@ sum_am_stack <- function(s, spp, do_rel=T, do_ext=T, do_rng=T, do_sca=T, binary_
       s <- s * spp$rescale_RES
     }
   }
-  
+
   # sum
   r <- sum(s, na.rm = T)
-  
+
   # do_sca: final rescale [0-1]
   if (do_sca){
     values(r) <- rescale(values(r))
   }
-  
+
   # mask
-  #m <- overlay(s, fun=function(x) ifelse(sum(!is.na(x)) > 0, 1, NA))
-  fxn <- function(x){ ifelse(sum(!is.na(x)) > 0, 1, NA) }
-  raster::beginCluster()
-  m <- raster::clusterR(s, overlay, args=list(fun = fxn))
-  raster::endCluster()
-  
-  r <- mask(r, m) # plot(r); 
+  m <- overlay(s, fun=function(x) ifelse(sum(!is.na(x)) > 0, 1, NA))
+  r <- mask(r, m) # plot(r);
   # projectRasterForLeaflet(raster_trim(r), method="ngb") %>% mapview::mapview(attr(r, "r_leaflet"))
 
   r
@@ -229,10 +208,10 @@ sum_am_rasters <- function(..., attr_leaflet=T){
   # spp_wts: species weights, to apply in same order as rasters. defaults to 1
   # TODO: add species richness factor, so more species -> stronger result
   # ...: rasters
-  
+
   rasters <- list(...)
   s <- stack(rasters)
-  
+
   # if (!is.null(spp_wts)){
   #   stopifnot(length(rasters)==length(spp_wts))
   #   for (i in 1:length(spp_wts))
@@ -240,37 +219,37 @@ sum_am_rasters <- function(..., attr_leaflet=T){
   # } #else {
     #spp_wts = rep(1, length(rasters))
   #}
-    
+
   # spp_wts <- ext_wts[c(ext_right, ext_blue)]
-  
+
   # get weighted mean
   #r <- weighted.mean(s, spp_wts)
-  
+
   # sum across all species rasters
   #r <- calc(s, function(x) )
   #r <- calc(s, fun = sum, na.rm = T)
   r <- sum(s, na.rm = T)
   #plot(raster(s, layer=1), col=rev(rainbow(255)))
-  
+
   # mask
   m <- overlay(s, fun=function(x) ifelse(sum(!is.na(x)) > 0, 1, NA))
   r <- mask(r, m)
-  
+
   # trim
-  #r <- 
+  #r <-
   #summary(r); plot(r, col=rev(rainbow(255)))
   #summary(r0); plot(r0, col=rev(rainbow(255)))
   #summary(r0); plot(stack, r0)
   #r <- calc(s, fun = sum, na.rm = T)
   #summary(r0)
-  
+
   # if (spp_all_normalize)
   #   r <- r / cellStats(r, stat='max', na.rm=T)
-  
+
   # project for leaflet
   if (attr_leaflet)
     attr(r, "r_leaflet")  <- projectRasterForLeaflet(raster_trim(r), method="ngb")
-  
+
   r
 }
 
@@ -283,7 +262,7 @@ add_am_raster <- function(m, r, lyr_name, r_type="spp"){
   # r_type="spp" or "sum"
   # r <- r_right
   r <- attr(r, "r_leaflet")
-  
+
   max_r <- cellStats(r, stat='max', na.rm=T)
   sum_r <- cellStats(r, stat='sum', na.rm=T)
 
@@ -291,7 +270,7 @@ add_am_raster <- function(m, r, lyr_name, r_type="spp"){
   if (r_type != "spp"){
     rng <- c(0, max_r)
   }
-  
+
   pal <- colorNumeric(
     "inferno", rng, na.color = "transparent", reverse=T)
 
@@ -313,10 +292,10 @@ add_am_raster <- function(m, r, lyr_name, r_type="spp"){
     }
     labs
   }
-  
+
   m %>%
     addRasterImage(
-      r, colors = pal, opacity = 0.6, project=F, 
+      r, colors = pal, opacity = 0.6, project=F,
       group=lyr_name) %>%
     addLegend(
       group = lyr_name, pal = pal,
@@ -329,7 +308,7 @@ add_am_raster <- function(m, r, lyr_name, r_type="spp"){
 }
 
 map_am_layer <- function(lyr){
-  
+
   m <- leaflet() %>%
     addProviderTiles(
       providers$Esri.OceanBasemap, options=providerTileOptions(opacity=0.6)) %>%
@@ -354,7 +333,7 @@ map_am_layer <- function(lyr){
 
 map_am_sum <- function(r, name){
   r_m <- projectRasterForLeaflet(raster_trim(r), method="ngb")
-  
+
   rng <- range(values(r), na.rm=T)
   pal <- colorNumeric(
     "inferno", rng, na.color = "transparent", reverse=T)
@@ -366,7 +345,7 @@ map_am_sum <- function(r, name){
     addLegend(
       group = name, pal = pal,
       position = "bottomright",
-      values = rng, 
+      values = rng,
       title = name)
 }
 ```
@@ -392,12 +371,12 @@ for (i in 1:length(spp_ids)){ # i = 1
   cat(sprintf("%04d of %d: %s -- %s\n", i, length(spp_ids), sp_id, Sys.time()))
   # https://www.aquamaps.org/preMap2.php?cache=1&SpecID=Fis-22812
   sp_id <- spp_ids[i]
-  
+
   sp_id_to_tif(sp_id)
 }
 
 # estimate time to completion ----
-  
+
 # 0001 of 24904: Fis-22812 -- 2018-07-01 20:49:01
 # 0349 of 24904: Fis-29786 -- 2018-07-01 20:56:19
 # 1214 of 24904: Fis-30623 -- 2018-07-01 21:15:14
@@ -408,7 +387,7 @@ difftime(t_now, t_beg, units="hours") / i_now * (i_all - i_now) + t_now
 
 # calculate avg file size ----
 dir_spp <- "/Volumes/Best HD/mbon_data_big/aquamaps/species_rasters"
-file_info(dir_ls(dir_spp)) %>% 
+file_info(dir_ls(dir_spp)) %>%
   summarize(
     size = mean(size)) %>%
   pull(size) * 24904 / 1000000
@@ -417,7 +396,7 @@ file_info(dir_ls(dir_spp)) %>%
 ## Load into PostGIS DB
 
 ```bash
-gdal2wktraster.py -r C:\Temp\TutData\SRTM\tif\*.tif -t srtm_tiled 
+gdal2wktraster.py -r C:\Temp\TutData\SRTM\tif\*.tif -t srtm_tiled
       -s 4326 -k 60x60 -I > C:\Temp\TutData\SRTM\srtm.sql
 ```
 
@@ -432,7 +411,7 @@ To demonstrate the methodology of "range normalization", let's compare a cumulat
 - **expansive**: [blue whale (_Balaenoptera musculus_)](https://www.aquamaps.org/preMap2.php?cache=1&SpecID=ITS-Mam-180528)
 
   ![](https://www.aquamaps.org/imagethumb/workimagethumb.php?s=http://www.aquamaps.org/imagethumb/file_destination/exp_8_pic_ITS-Mam-180528.jpg&w=250)
-  
+
 For a given cell ($c$), we might simply take the sum of AquaMap's Relative Environmental Suitability (RES; $e$; ranging in value [0, 1]) per species ($s$) across the number of species ($S$) to arrive at a cumulative species richness ($R$) that is weighted by the species suitability within the given cell:
 
 $$
@@ -449,7 +428,7 @@ $$
 
 - $a_c$: area of cell
 - $c$: cell
-- $e$: AquaMap's Relative Environmental Suitability (RES; ranging in value [0, 1]) 
+- $e$: AquaMap's Relative Environmental Suitability (RES; ranging in value [0, 1])
 - $E_s$: total environmental suitability, per species
 - $R_c$: species richness, per cell
 - $RN R_c$: range normalized species richness, per cell
@@ -495,7 +474,7 @@ r_nrsum <- sum_am_rasters(r_right_w_a_r, r_blue_w_a_r)
 #plot(r_sum)
 #plot(r_nrsum)
 #r_add3 <- add_am_rasters(r_right, r_blue, spp_range_normalize=T, spp_all_normalize=T, spp_wts = NULL)
-#r_add4 <- add_am_rasters(r_right, r_blue, spp_range_normalize=T, spp_all_normalize=T, 
+#r_add4 <- add_am_rasters(r_right, r_blue, spp_range_normalize=T, spp_all_normalize=T,
 #                         spp_wts = ext_wts[c(ext_right, ext_blue)])
 
 # summary(r_sum)
@@ -515,8 +494,8 @@ The equation above is problematic because it biases equatorial cells and downwei
 
 - *Extinction risk* ($w_s$): 1 = extinct, 0.8 = critically endangered, ...,  0.2 = least concern
 
-- *Range normalization* ($N_s$): species normalization factor, based on the smallest species range within a given taxonomic group, eg Mammalia. 
- 
+- *Range normalization* ($N_s$): species normalization factor, based on the smallest species range within a given taxonomic group, eg Mammalia.
+
 So alternatively, we describe a range normalization factor per species ($N_s$) that can be applied to all cells ($C$) regardless of the cell area (ie largest at equator, smallest at pole) relative to some minimum range size we define as 1.
 
 $$
@@ -548,7 +527,7 @@ redo_spp_g <- F
 if (!file.exists(spp_g_csv) | redo_spp_g){
   spp_g <- spp %>%
     filter(Class == "Mammalia") %>%
-    arrange(Genus, Species) %>% 
+    arrange(Genus, Species) %>%
     mutate(
       group         = "Mammalia",
       genus_species = glue("{Genus} {Species}") %>% as.character(),
@@ -556,7 +535,7 @@ if (!file.exists(spp_g_csv) | redo_spp_g){
       iucn_weight   = iucn_weights[iucn_category],
       tif           = glue("{dir_spp}/{SPECIESID}.tif"),
       stack_name    = str_replace_all(SPECIESID, "-", "."))
-  
+
   write_csv(spp_g, spp_g_csv)
 }
 spp_g <- read_csv(spp_g_csv)
@@ -566,7 +545,7 @@ s_g <- stack(sapply(spp_g$tif, function(tif) raster(tif, crs=leaflet:::epsg4326)
 names(s_g) <- spp_g$SPECIESID
 
 get_spp_stat <- function(stack_name, s, stat="sum_RES"){
-  #stack_name <- spp_g$r[1] 
+  #stack_name <- spp_g$r[1]
   r <- raster(s, stack_name)
   if (stat == "sum_RES"){
     cellStats(r, stat = "sum")
@@ -666,20 +645,20 @@ Tittensor DP, C Mora, W Jetz, HK Lotze, D Ricard, EV Berghe, B Worm (2010) [Glob
     - **Worms**: `Phylum == "Annelida"`
     - Cnidaria
         - **Hydrozoans**: `Class == "Hydrozoa"`
-      
+
 
 
 ```{r AquaMaps groups}
 if (!file.exists(spp_grouped_csv)){
   spp <- suppressMessages({ read_csv(spp_csv) })
-  
+
   # spp %>% filter(is.na(group)) %>% pull(Class) %>% table() %>% sort()
   # spp %>% filter(Class == "Reptilia") %>% View() %>% pull(Class) %>% table() %>% sort
-  #  
+  #
   # # https://en.wikipedia.org/wiki/Mangrove
   # spp %>% filter(Family %in% c("Acanthaceae","Arecaceae","Bombacaceae","Cyperaceae","Euphorbiaceae","Lecythidaceae","Lythraceae","Meliaceae","Myrtaceae","Pellicieraceae","Plumbaginaceae","Primulaceae","Pteridaceae","Rubiaceae","Sterculiaceae"))
 
-  spp <- spp %>% 
+  spp <- spp %>%
     mutate(
       group = case_when(
         Class == "Actinopterygii" & !Family %in% c("Scombridae", "Istiophoridae", "Xiphiidae") ~ "Coastal fishes",
@@ -703,7 +682,7 @@ if (!file.exists(spp_grouped_csv)){
         Phylum == "Echinodermata"~ "Echinoderms",
         Phylum == "Porifera" ~ "Sponges",
         Phylum == "Annelida" ~ "Worms",
-        Class == "Hydrozoa" ~ "Hydrozoans")) %>% 
+        Class == "Hydrozoa" ~ "Hydrozoans")) %>%
     select(-X11, -X12)
   write_csv(spp, spp_grouped_csv)
 }
@@ -722,74 +701,49 @@ spp %>% filter(is.na(group)) %>% pull(Class) %>% table() %>% sort()
 
 # iterate over groups ----
 groups <- spp %>%
-  group_by(group) %>% 
+  group_by(group) %>%
   summarize(
-    n = n()) %>% 
+    n = n()) %>%
   arrange(n) %>%  #View()
-  filter(!is.na(group)) %>%
   pull(group)
 #groups <- sort(unique(spp$group))
-#for (i in seq_along(groups)){ # i = 3
-for (i in 18:length(groups)){ # i = 3
+for (i in seq_along(groups)){ # i = 3
   grp       <- groups[i]
   spp_grp   <- filter(spp, group == !!grp) %>% arrange(Genus, Species)
   grp_fname <- grp %>% str_replace_all("[ -]", ".") %>% str_to_lower()
   cat(glue("group {sprintf('%02d',i)} of {length(groups)}: {grp} (n_spp = {format(nrow(spp_grp), big.mark = ',')}) - {Sys.time()}\n\n"))
-  
-  spp_grp_grd         <- glue("{dir_local}/spp_{grp_fname}.grd")
+
   spp_grp_ext_csv     <- glue("{dir_spp}/../groups/spp_{grp_fname}_ext.csv")
   spp_grp_ext_grd_csv <- glue("{dir_spp}/../groups/spp_{grp_fname}_ext_grd.csv")
   grp_be_tif  <- glue("{dir_spp}/../groups/spp_{grp_fname}_be.tif")  # binary, extinction
   #grp_rem_tif <- glue("{dir_spp}/groups/spp_{grp_fname}_rem.tif") # relative, extinction, endemism
   grp_rel_tif <- glue("{dir_spp}/../groups/spp_{grp_fname}_rel.tif") # relative, extinction, log(endemism)
-  
+
   if (!file.exists(spp_grp_ext_csv)){
     cat(glue("  fetching spp_grp IUCN categories - {Sys.time()}\n", .trim=F))
-    
-    spp_grp <- spp_grp %>%
-      mutate(
-        genus_species = glue("{Genus} {Species}") %>% as.character(),
-        #iucn_category = map_chr(genus_species, get_iucn_category),
-        # parallelize with future:: 3X faster!
-        iucn_future   = map(genus_species, ~future(get_iucn_category(.x))), 
-        iucn_category = map_chr(iucn_future, ~value(.x)),
-        iucn_weight   = iucn_weights[iucn_category],
-        tif           = glue("{dir_spp}/{SPECIESID}.tif"),
-        tif_ext       = glue("{dir_spp}/{SPECIESID}_ext.tif"),
-        stack_name    = str_replace_all(SPECIESID, "-", ".")) %>% 
-      select(-iucn_future)
+
+    system.time({
+      spp_grp <- spp_grp %>%
+        mutate(
+          genus_species = glue("{Genus} {Species}") %>% as.character(),
+          #iucn_category = map_chr(genus_species, get_iucn_category),
+          iucn_future   = map(genus_species, ~future(get_iucn_category(.x))), # parallelize with future:: 3X faster!
+          iucn_category = map_chr(iucn_future, ~value(.x)),
+          iucn_weight   = iucn_weights[iucn_category],
+          tif           = glue("{dir_spp}/{SPECIESID}.tif"),
+          stack_name    = str_replace_all(SPECIESID, "-", ".")) %>%
+        select(-iucn_future)
+    }) # normal: 21.5 -> 7.8 / 15.0 / 19.7
     write_csv(spp_grp, spp_grp_ext_csv)
   }
   spp_grp <- suppressMessages({ read_csv(spp_grp_ext_csv) })
-  # quick fix
-  spp_grp <- spp_grp %>%
-    mutate(
-      tif_ext = glue("{dir_spp}/{SPECIESID}_ext.tif"))
-  write_csv(spp_grp, spp_grp_ext_csv)
-  spp_grp <- suppressMessages({ read_csv(spp_grp_ext_csv) })
-  
-  cat(glue("  extend species rasters to globe - {Sys.time()}\n", .trim=F))
-  #sapply(spp_grp$tif, function(tif, tif_ext) raster(tif, crs=leaflet:::epsg4326) %>% extend(r_na))
-  extend_tif <- function(tif, tif_ext){
-    if (file.exists(tif_ext)) return(F)
-    raster(tif, crs=leaflet:::epsg4326) %>% 
-      extend(r_na) %>% 
-      writeRaster(tif_ext)
-    return(T)
-  }
-  # fs::file_delete(spp_grp$tif_ext)
-  future_tifs <- map2(spp_grp$tif, spp_grp$tif_ext, ~future(extend_tif(.x, .y)))
-  future_vals <- map_lgl(future_tifs, ~value(.x))
 
-  # TODO: spp raster here
-  
   if (any(!file.exists(spp_grp_ext_grd_csv, grp_be_tif, grp_rel_tif))){
-    cat(glue("  read raster stack of species - {Sys.time()}\n", .trim=F))
-    #s_g <- stack(spp_grp_grd)
-    s_g <- stack(spp_grp$tif_ext)
+    cat(glue("  get raster stack of species, extended to globe - {Sys.time()}\n", .trim=F))
+    s_g <- stack(sapply(spp_grp$tif, function(tif) raster(tif, crs=leaflet:::epsg4326) %>% extend(r_na)))
     names(s_g) <- spp_grp$SPECIESID
   }
-  
+
   if (!file.exists(spp_grp_ext_grd_csv)){
     cat(glue("  rescaling with cellStats - {Sys.time()}\n", .trim=F))
 
@@ -800,15 +754,15 @@ for (i in 18:length(groups)){ # i = 3
         sum_area_km2   = map_dbl(stack_name, get_spp_stat, s_g, "sum_area_km2"),
         rescale_RES    = rescale(1/sum_RES),
         logrescale_RES = rescale(1/log(sum_RES)))
-    
+
     write_csv(spp_grp, spp_grp_ext_grd_csv)
   }
   spp_grp <- suppressMessages({ read_csv(spp_grp_ext_grd_csv) })
   #table(spp_grp$iucn_weight)
 
   # spp_grp %>%
-  #   select(SPECIESID, FBname, genus_species, 
-  #          iucn_category, iucn_weight, 
+  #   select(SPECIESID, FBname, genus_species,
+  #          iucn_category, iucn_weight,
   #          sum_area_km2, sum_RES, rescale_RES, logrescale_RES) %>%
   #   DT::datatable()
   # table(spp_g$iucn_category, useNA = "ifany")
@@ -818,7 +772,7 @@ for (i in 18:length(groups)){ # i = 3
     r_be  <- sum_am_stack(
       s_g, spp_grp, do_rel=F, do_ext=T, do_rng=F, do_sca=T, binary_threshold = 0.4)
     writeRaster(r_be, grp_be_tif)
-  }  
+  }
   #r_be <- raster(grp_be_tif)
   if (!file.exists(grp_rel_tif)){
     cat(glue("  sum_am_stack(relative, extinction, log(endemism)) - {Sys.time()}\n", .trim=F))
@@ -833,285 +787,6 @@ for (i in 18:length(groups)){ # i = 3
   # map_am_sum(r_rel, glue("{grp}: Relative<br> * Extinction<br> * log(Endemism)"))
 }
 ```
-
-```
- Error: vector memory exhausted (limit reached?) 
-   3. setValues(out, res) 
-   2. raster::clusterR(s, stackApply, args = list(indices = 1:nlayers(s), fun = v_to_binary, na.rm = T)) 
-   1. sum_am_stack(s_g, spp_grp, do_rel = F, do_ext = T, do_rng = F, do_sca = T, binary_threshold = 0.4) 
-```
-So try with db approach...
-
-```{r db connect}
-library(RPostgreSQL)
-
-# create Postgres db
-# docker exec -it nrel-postgis bash
-# su postgres -c "createdb -O bbest mbon-am"
-# echo "**#******" > ~/.nrel_db_pass
-# connect to postgis database
-con_params <- list(
-  dbname   = "mbon-am",
-  host     = "localhost",
-  port     = 5432,
-  user     = "bbest",
-  password = readLines("~/.nrel_db_pass"))
-src <- do.call(src_postgres, c(list(drv = PostgreSQL()), con_params))
-# dbExecute(src$con, "create extension postgis;")
-# TODO: set synchronous_commit off
-#   For example, to make a single multistatement transaction commit asynchronously when the default is the opposite, issue SET LOCAL synchronous_commit TO OFF within the transaction.
-#   https://www.postgresql.org/docs/9.1/static/runtime-config-wal.html#GUC-SYNCHRONOUS-COMMIT
-#   https://www.postgresql.org/docs/9.1/static/wal-async-commit.html
-```
-
-```{r csv to db}
-library(tidyverse)
-library(here)
-library(glue)
-
-dir_dat    <- "/Volumes/Best HD/mbon_data_big/aquamaps"
-tbl_csvs <- list(
-  #obs_csv = file.path(dir_dat, "occurrencecells_ver0816c.csv"),
-  spp       = file.path(dir_dat, "speciesoccursum_ver0816c.csv"),
-  obs       = file.path(dir_dat, "occurrencecells_ver0816c_head-100K-rows.csv"),
-  #cells = file.path(dir_dat, "hcaf_species_native_ver0816c.csv"),
-  env       = file.path(dir_dat, "hcaf_v6.csv"),
-  spp_cells = file.path(dir_dat, "hcaf_species_native_ver0816c_head-100K-rows.csv"))
-
-source(here("technical/con_mbon-am_pgdb.R"))
-
-for (i in seq_along(tbl_csvs)){ # i=1
-#for (i in 2:3){ # i=1
-  tbl <- names(tbl_csvs)[i]
-  csv <- tbl_csvs[[tbl]]
-  csv_big <- str_replace(csv, "_head-100K-rows", "")
-  
-  
-  if (tbl %in% dbListTables(con)) next
-  
-  cat(glue("{i} {tbl}: {basename(csv_big)}\n\n"))
-  d <- read_csv(csv)
-  
-  copy_to(con, d, tbl, temporary=F, overwrite=T)
-  if (csv_big != csv){
-    csv_big <- str_replace(csv_big, "/Volumes/Best HD", "/extdrive")
-    
-    dbExecute(con, glue("DELETE FROM {tbl};"))  
-    dbExecute(con, glue("COPY {tbl} FROM '{csv_big}' CSV HEADER;"))
-  }
-}
-```
-
-```{r db_process}
-# TODO: spp_group.csv w/ IUCN is.na(category) -> "NA"
-# dbListTables(con)
-
-spp <- tbl(con, "spp")
-
-spp_groups <- read_csv(spp_grouped_csv) %>% 
-  select(SPECIESID, group)
-copy_to(con, spp_groups, "spp_groups", temporary=F)
-spp_groups <- tbl(con, "spp_groups")
-
-spp_g <- spp %>% 
-  left_join(spp_grouped, by="SPECIESID", copy=T) %>% 
-  collect()
-copy_to(con, spp_g, "spp", temporary=F, overwrite=T)
-
-spp <- dbReadTable(con, "spp")
-copy_to(
-  con, spp, "spp", temporary=F, overwrite=T,
-  unique_indexes=list("SPECIESID"),
-  indexes = list("group"))
-
-spp <- tbl(con, "spp")
-spp_cells <- tbl(con, "spp_cells")
-
-#dbExecute(con, "ALTER TABLE spp_cells RENAME TO spp_cells_0raster;")
-#dbExecute(con, "ALTER TABLE cells RENAME TO spp_cells;")
-#dbExecute(con, 'ALTER TABLE spp_cells RENAME COLUMN "SpeciesID" TO "SPECIESID";')
-#dbExecute(con, 'ALTER TABLE spp_cells RENAME COLUMN "SPECIESID0" TO "SPECIESID";')
-#dbDisconnect(con)
-
-dbListFields(con, "spp_cells")
-tbl(con, "cells")
-spp_cells <- tbl(con, "spp_cells")
-spp       <- tbl(con, "spp")
-
-groups <- dbGetQuery(con, 'SELECT "group", COUNT("SPECIESID") AS n_spp FROM spp GROUP BY "group" ORDER BY "n_spp";')
-
-
-grp <- "Reptiles"
-
-spp_c <- spp_cells %>% 
-  left_join(spp %>% select(SPECIESID, group), by="SPECIESID") %>% 
-  filter(group == grp)
-spp_grp_ext_csv     <- glue("{dir_spp}/../groups/spp_{grp}_ext.csv")
-spp_grp <- suppressMessages({ read_csv(spp_grp_ext_csv) })
-
-"Boa constrictor" # is.na(iucn_category)
-spp_grp$genus_species[9]
-get_iucn_category("Boa constrictor")
-
-spp_cells %>% 
-  group_by(CenterLong) %>% 
-  summarize(n = n())
-spp_cells$CenterLat
-spp_cells$CenterLong
-
-r_na <- raster(
-  xmn = -180, xmx = 180, ymn = -90, ymx = 90, 
-  resolution=0.5, crs=leaflet:::epsg4326)
-xy <- xyFromCell(r_na, 1:ncell(r_na))
-cells <- tibble(
-  cell_id    = 1:ncell(r_na),
-  CenterLat  = xy[,1],
-  CenterLong = xy[,2],
-  area  = values(area(r_na)))
-copy_to(
-  con, cells, "cells", temporary=F, overwrite=T,
-  unique_indexes=list("cell_id"),
-  indexes = list("CenterLat", "CenterLong"))
-cells <- tbl(con, "cells")
-
-
-```
-
-
-```{r spp to db parallel}
-library(readr)
-library(dplyr)
-library(glue)
-library(raster)
-library(doParallel) # loads: foreach,iterators,parallel
-
-dir_spp          <- "/Volumes/Best HD/mbon_data_big/aquamaps/species_rasters"
-spp_grouped_csv  <- "/Volumes/Best HD/mbon_data_big/aquamaps/spp_groups.csv"
-
-spp <- suppressMessages({ read_csv(spp_grouped_csv) }) %>%
-    mutate(
-      tif     = glue("{dir_spp}/{SPECIESID}.tif"),
-      tif_ext = glue("{dir_spp}/{SPECIESID}_ext.tif")) %>% 
-  arrange(SPECIESID)
-
-groups <- spp %>%
-  group_by(group) %>% 
-  summarize(
-    n = n()) %>% 
-  arrange(n) %>%  #View()
-  filter(!is.na(group)) # %>%
-  #pull(group)
-
-#spp_grp <- spp %>% filter(group == "Chitons")
-
-# AquaMaps raster specifications for 0.5 degree global raster
-r_na <- raster(
-  xmn = -180, xmx = 180, ymn = -90, ymx = 90, 
-  resolution=0.5, crs=leaflet:::epsg4326)
-
-extend_tif <- function(tif, tif_ext){
-  if (file.exists(tif_ext)) return(F)
-  raster::raster(tif, crs=leaflet:::epsg4326) %>% 
-    raster::extend(r_na) %>% 
-    raster::writeRaster(tif_ext)
-  return(T)
-} # depends on r_na
-
-sp_to_db <- function(sp_id){
-  
-  dir_spp <- "/Volumes/Best HD/mbon_data_big/aquamaps/species_rasters"
-  tif     <-  glue("{dir_spp}/{sp_id}.tif")
-  tif_ext <-  glue("{dir_spp}/{sp_id}_ext.tif")
-  #cat(glue("{sprintf('%04d', i)} of {nrow(spp)}: {sp_id}\n\n"))
-  
-  sql_cnt <- glue("SELECT COUNT(value) AS cnt FROM spp_cells WHERE sp_id = '{sp_id}';")
-  cnt <- dbGetQuery(con, sql_cnt) %>%
-    pull(cnt)
-  if (cnt > 0 ) return(F)
-  
-  res <- extend_tif(tif, tif_ext)
-  r <- raster(tif_ext)
-  
-  r_vals <- tibble(
-    sp_id    = !!sp_id,
-    cell_id  = 1:ncell(r),
-    value    = values(r)) %>%
-    filter(!is.na(value))
-  
-  # db_drop_table(con, "layer_values")
-  if (!"spp_cells" %in% dbListTables(con)){
-    cat(glue("    creating table spp_cells\n", .trim = F))
-    copy_to(con, r_vals, "spp_cells", temporary = F, overwrite = T, 
-            unique_indexes=list(c("sp_id", "cell_id")),
-            indexes = list("sp_id", "cell_id"))
-  } else {
-    cat(glue("    appending to table spp_cells\n", .trim = F))
-    dbWriteTable(con, "spp_cells", r_vals, row.names=F, append = T)
-  } 
-  return(T)
-}
-
-cl <- makePSOCKcluster(detectCores())
-registerDoParallel(cl)
-
-clusterEvalQ(cl, {
-  source("/Users/bbest/github/sdg14/technical/con_mbon-am_pgdb.R")
-  library(dplyr)
-  library(glue)
-  library(raster)
-  NULL
-})
-
-for (grp in c("Crustaceans", "Coastal fishes", "Gastropods")){ # grp = "Gastropods"
-  spp_grp <- spp %>% filter(group == grp)
-  cat(glue("{grp} (nrow = {nrow(spp_grp)}) - {Sys.time()}"))
-
-  foreach(
-    sid=spp_grp$SPECIESID, #) %dopar% 
-    .inorder=FALSE, .export = c("r_na", "extend_tif"), .noexport="con") %dopar% 
-    #.packages=c("glue", "dplyr", "raster", "DBI", "RPostgreSQL")) %dopar% 
-    sp_to_db(sid)
-}
-
-clusterEvalQ(cl, {
-  dbDisconnect(con)
-})
-```
-
-```{r ext_tifs}
-ext_tifs <- tibble(
-  path = list.files(dir_spp, ".*_ext.tif$", full.names=T),
-  ctime = file.info(path)$ctime) %>%
-  filter(ctime > lubridate::as_datetime("2018-10-11 11:54:00")) %>%
-  arrange(ctime)
-
-#View(ext_tifs)
-range(ext_tifs$ctime) # "2018-10-11 11:46:08 PDT" "2018-10-11 12:23:08 PDT" "2018-10-11 14:47:58 PDT"
-diff(range(ext_tifs$ctime)) / nrow(ext_tifs) * 2300 # = 35.39933 mins
-#for (i in seq_along(d$SPECIESID)){ # i <- 1; sp_id <- spp$SPECIESID[i]
-
-```
-
-```{r}
-system.time({
-  future_tifs <- map(
-    spp_grp$SPECIESID, 
-    ~future({
-      sp_to_db(.x)},
-      packages = c("glue", "dplyr", "raster", "DBI", "RPostgreSQL"),
-      globals =c("dir_spp", "src")))
-}) # 18.7 sec
-future_vals <- map_lgl(future_tifs, ~value(.x))
-```
-
-```{r}
-spp_cells_csv <- "/Volumes/Best HD/mbon_data_big/aquamaps/occurrencecells_ver0816c_head-100K-rows.csv"
-
-library(tidyverse)
-read_csv(spp_cells_csv)
-
-```
-
 
 ```{r todo sharks oceanic vs coastal with rl_habitats, eval=F}
 
@@ -1217,7 +892,7 @@ Here's how the presence of species (binary, from IUCN range map or AquaMaps RES 
 - [OHI Goals](http://ohi-science.org/goals/#biodiversity)
 
 $$
-x_{SPP} = \frac{\sum_{k=1}^{M} (\frac{\sum_{i=1}^{N} w_{i}}{N}) * A_{C}}{A_{T}} 
+x_{SPP} = \frac{\sum_{k=1}^{M} (\frac{\sum_{i=1}^{N} w_{i}}{N}) * A_{C}}{A_{T}}
 $$
 
 - $M$ = number of grid cells in the assessment region
@@ -1226,7 +901,7 @@ $$
 
 - $A$ = total area of a grid cell [$c$] the assessment region [T]
 
-- $w_{i}$ = status weight assigned per threat 
+- $w_{i}$ = status weight assigned per threat
 
 assessed species list and maps: IUCN
 

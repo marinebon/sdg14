@@ -1,0 +1,83 @@
+---
+title: "aquamaps_groups.Rmd"
+author: "Ben Best"
+date: "11/27/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+original: `aquamaps_ingest.Rmd`
+
+## Taxonomic Groups
+
+Tittensor DP, C Mora, W Jetz, HK Lotze, D Ricard, EV Berghe, B Worm (2010) [Global patterns and predictors of marine biodiversity across taxa](https://doi.org/10.1038/nature09329). _Nature_
+
+- Primarily coastal species (Tittensor et al 2010)
+    - **Coastal fishes**: `Class == "Actinopterygii" & !Family %in% c("Scombridae", "Istiophoridae", "Xiphiidae")`
+    - Non-oceanic sharks: TODO with `rredlist::rl_habitats()`
+    - **Non-squid cephalopods**: `Class == "Cephalopoda" & !Order %in% c("Myopsida","Oegopsida")`
+    - **Pinnipeds**: `Family %in% c("Odobenidae", "Otariidae", "Phocidae")`
+    - **Corals**: `Class == "Anthozoa"` (soft/hard + anemones + gorgonians)
+    - **Seagrasses**: `Order == "Alismatales"`
+    - **Mangroves**: `Genus == "Avicennia" & Species == "germinans"` (n=1)
+- Primarily oceanic species (Tittensor et al 2010)
+    - **Tunas and billfishes**: `Family %in% c("Scombridae", "Istiophoridae", "Xiphiidae")`
+    - Oceanic sharks: TODO with `rredlist::rl_habitats()`
+    - **Squids**:  `Order %in% c("Myopsida","Oegopsida")`
+    - **Cetaceans**: `Order == "Artiodactyla"`
+    - **Euphausiids**: `Order == "Euphausiacea"`
+    - Foraminifera: n=0 for Phylum=Retaria
+- Others (Phylum - Class)
+    - Arthropoda
+        - **Crustaceans**: `Class %in% c("Malacostraca","Ostracoda","Branchiopoda","Cephalocarida","Maxillopoda")`
+        - **Sea spiders**: `Class == "Pycnogonida"`
+        - skipping: Arachnida (1), Merostomata (1)
+    - Mollusca
+        - **Gastropods**: `Class == "Gastropoda"`
+        - **Bivalves**:  `Class == "Bivalvia"`
+        - **Chitons**: `Class == "Polyplacophora"`
+        - Cephalopods
+        - Squids
+    - Chordata
+        - **Tunicates**: `Class %in% c("Ascidiacea","Thaliacea")`
+        - **Sharks**: `Class == "Elasmobranchii"` (actually Class=Chondrichthyes, Subclass=Elasmobranchii)
+        - **Reptiles**: `Class == "Reptilia"` crocodiles, sea snakes & sea turtles
+    - **Echinoderms**: `Phylum == "Echinodermata"`
+    - **Sponges**: `Phylum == "Porifera"`
+    - **Worms**: `Phylum == "Annelida"`
+    - Cnidaria
+        - **Hydrozoans**: `Class == "Hydrozoa"`
+        
+```{r}
+library(tidyverse)
+
+dir_dat    <- "/Volumes/Best HD/mbon_data_big/aquamaps"
+spp_grouped_csv <- file.path(dir_dat, "spp_groups.csv")
+
+spp <- suppressMessages({ read_csv(spp_grouped_csv) })
+
+cat("\nspp$group\n")
+table(spp$group)
+
+# show AquaMap species counts by Phylum and Class ----
+cat("\nspp$Phylum\n")
+table(spp$Phylum)
+cat("\nspp$Class\n")
+table(spp$Class)
+cat("\nspp$Class sorted by count\n")
+table(spp$Class) %>% sort()
+cat("\nspp$Class not in group\n")
+spp %>% filter(is.na(group)) %>% pull(Class) %>% table() %>% sort()
+```
+
+```{r}
+spp %>% 
+  group_by(group) %>% 
+  summarize(
+    n = n() %>% scales::comma()) %>% 
+knitr::kable(align = c("l","r"))
+```
+
